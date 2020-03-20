@@ -26,3 +26,13 @@ Create a package that does single-trial ("beta") pattern estimation using regula
 * Should we concatenate runs at some point? Maybe within session? This gives us many more datapoints to fit (but we need to assume that the true "noise models" are stationary across runs) and in that case we can do leave-one-run-out CV
 * Should we, in general, fit the single-trial model separately from the denoising model? The single-trial model has to be cross-validated as well because we're probably going to use Kendrick's HRF set (which we'll loop over)
 * Maybe do not cross-validate across sessions? (Because I think the noise sources/contributions are not stationary across sessions)
+
+### Download example/test data
+In the root of the directory, run:
+
+
+```
+./scripts/download_data
+```
+
+This will download one Fmriprep-preprocessed subject with one session (with 8 runs), which includes preprocessed volume and surface (gifti) data, confounds, and events. Note, it's 6.6 GB, so it might take a while.

@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+set -e
+out=pybest/data/sub-05.tar.gz
+if [ -f $out ]; then
+    echo "Data is already downloaded!"
+    if [ -d pybest/data/sub-05 ]; then
+	exit 0
+    fi
+else
+    echo "Downloading data ..."
+    curl -o pybest/data/sub-05.tar.gz https://surfdrive.surf.nl/files/index.php/s/N3hjbM9J8Egu0o0/download
+fi
+echo "Unzipping data ..."
+tar -xzvf pybest/data/sub-05.tar.gz -C pybest/data
