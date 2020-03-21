@@ -2,7 +2,7 @@ import os
 import click
 import os.path as op
 from glob import glob
-from .util import logger, preprocess, Dataset
+from .util import logger, preprocess
 from .noise_model import optimize_noise_model
 from .signal_model import optimize_signal_model
 
@@ -129,7 +129,7 @@ def main(bids_dir, out_dir, fprep_dir, ricor_dir, participant_label, session, ta
                 else:
                     gm_prob = None
 
-                    
+                preprocess(funcs, mask=gm_prob, space=space, logger=logger)
 
 
 
