@@ -10,6 +10,7 @@ Create a package that does single-trial ("beta") pattern estimation using regula
 * Should be able to plug into KFold CV generator
 * Should allow for some form of custom HRF integration 
 
+
 ### Features to implement / try out
 * Create a new CV class that creates *continuous* KFold partitions (because autocorrelation)
 * Pipeline: scaling, PCA, 
