@@ -16,8 +16,10 @@ from .signal_model import optimize_signal_model
 @click.option('--session', default=None, required=False)
 @click.option('--task', default=None)
 @click.option('--space', default='T1w')
+@click.option('--high-pass', default=0.1)
 @click.option('--hemi', default='L')
-def main(bids_dir, out_dir, fprep_dir, ricor_dir, participant_label, session, task, space, hemi):
+@click.option('--tr', default=0.7)
+def main(bids_dir, out_dir, fprep_dir, ricor_dir, participant_label, session, task, space, high_pass, hemi, tr):
     """ Main API of pybest. """
 
     logger.info(f"Working on BIDS directory {bids_dir}")
@@ -129,7 +131,8 @@ def main(bids_dir, out_dir, fprep_dir, ricor_dir, participant_label, session, ta
                 else:
                     gm_prob = None
 
-                preprocess(funcs, mask=gm_prob, space=space, logger=logger)
+                ##### RUN PREPROCESSING #####
+                data, run_idx = preprocess(funcs, mask=gm_prob, space=space, tr=tr, logger=logger)
 
 
 
