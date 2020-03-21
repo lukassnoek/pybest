@@ -115,8 +115,15 @@ def main(bids_dir, out_dir, fprep_dir, ricor_dir, participant_label, session, ta
                     raise ValueError(
                         f"Found unequal number of funcs ({len(funcs)}), confs ({len(confs)}), and events ({len(events)})."
                     )
-                logger.info(f"Found {len(funcs)} runs of task {task}")
+                logger.info(f"Found {len(funcs)} runs for task {task}")
 
+                # Also find retroicor files
+                if ricor_dir is not None:
+                    ricors = sorted(glob(op.join(
+                        ricor_dir, f'sub-{participant}', f'ses-{ses}', 'physio', f'*task-{task}_*_regressors.tsv'
+                    )))
+                    logger.info(f"FOund {len(ricors)} RETROICOR files for task {task}")
+                
 
 if __name__ == '__main__':
 
