@@ -35,7 +35,7 @@ opts = dict(
     requires=REQUIRES,
     entry_points={
         'console_scripts': [
-            'pybest = pybest.cli.main',
+            'pybest=pybest.cli:main',
             ]
         }
 )
