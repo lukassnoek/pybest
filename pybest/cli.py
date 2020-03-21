@@ -2,7 +2,8 @@ import os
 import click
 import os.path as op
 from glob import glob
-from .util import logger, preprocess
+from .utils import logger
+from .preproc import preprocess
 from .noise_model import optimize_noise_model
 from .signal_model import optimize_signal_model
 
@@ -12,17 +13,24 @@ from .signal_model import optimize_signal_model
 @click.argument('out_dir', default=None, required=False)
 @click.argument('fprep_dir', default=None, required=False)
 @click.argument('ricor_dir', default=None, required=False)
-@click.option('--participant-label', default=None, required=False)
+@click.argument('participant-label', nargs=-1, required=False)
 @click.option('--session', default=None, required=False)
 @click.option('--task', default=None)
-@click.option('--space', default='T1w')
-@click.option('--high-pass', default=0.1)
-@click.option('--hemi', default='L')
-@click.option('--tr', default=0.7)
-def main(bids_dir, out_dir, fprep_dir, ricor_dir, participant_label, session, task, space, high_pass, hemi, tr):
+@click.option('--space', default='T1w', show_default=True)
+@click.option('--high-pass', default=0.1, show_default=True)
+@click.option('--hemi', type=click.Choice(['L', 'R']), default='L', show_default=True)
+@click.option('--tr', default=0.7, show_default=True)
+@click.option('--nthreads', default=1, show_default=True)
+def main(bids_dir, out_dir, fprep_dir, ricor_dir, participant_label, session, task,
+         space, high_pass, hemi, tr, nthreads):
     """ Main API of pybest. """
 
+    ##### <set defaults> #####
+    if not op.isdir(bids_dir):
+        raise ValueError(f"BIDS directory {bids_dir} does not exist!")
+
     logger.info(f"Working on BIDS directory {bids_dir}")
+
     if out_dir is None:  # Set default out_dir
         out_dir = op.join(bids_dir, 'derivatives', 'pybest')
         if not op.isdir(out_dir):
@@ -45,6 +53,14 @@ def main(bids_dir, out_dir, fprep_dir, ricor_dir, participant_label, session, ta
     
     if ricor_dir is not None:
         logger.info(f"Setting RETROICOR directory to {ricor_dir}")
+
+    if not participant_label:
+        participant_label = None
+    
+    ##### </set defaults> #####
+
+    ##### <gather data> #####
+    # Very ugly code, but necessary 
 
     # Use all possible participants if not provided
     if participant_label is None:
@@ -72,12 +88,13 @@ def main(bids_dir, out_dir, fprep_dir, ricor_dir, participant_label, session, ta
     else:
         session = [session] * len(participant_label)
 
-    # Use all tasks if not provided
+    # Use all tasks if no explicit task is provided
     if task is None:
         task = []
         for participant, this_ses in zip(participant_label, session):
             sub_tasks = []
             for ses in this_ses:
+                
                 tmp = glob(op.join(
                     bids_dir,
                     f'sub-{participant}',
@@ -89,6 +106,7 @@ def main(bids_dir, out_dir, fprep_dir, ricor_dir, participant_label, session, ta
                 these_task = list(set(
                     [op.basename(f).split('task-')[1].split('_')[0] for f in tmp]
                 ))
+        
                 sub_tasks.append(these_task)
                 logger.info(f"Found {len(these_task)} task(s) for sub-{participant} and ses-{ses}")
 
@@ -96,8 +114,12 @@ def main(bids_dir, out_dir, fprep_dir, ricor_dir, participant_label, session, ta
     else:
         task = [[task] * len(session)] * len(participant_label)
 
+    ##### </gather data> #####
+
+    # Set right "identifier" depending on fsaverage* or volumetric space
     space_idf = f'hemi-{hemi}.func.gii' if 'fs' in space else 'desc-preproc_bold.nii.gz'
 
+    ##### <start processing loop> #####
     for i, participant in enumerate(participant_label):
         for ii, ses in enumerate(session[i]):
             for iii, task in enumerate(task[i][ii]):
@@ -127,14 +149,15 @@ def main(bids_dir, out_dir, fprep_dir, ricor_dir, participant_label, session, ta
                     logger.info(f"Found {len(ricors)} RETROICOR files for task {task}")
 
                 if 'fs' not in space:
-                    gm_prob = op.join(fprep_dir, f'sub-{participant}', 'anat', f'sub-{participant}_label-GM_probseg.nii.gz')
+                    fname = f'sub-{participant}_label-GM_probseg.nii.gz'
+                    gm_prob = op.join(fprep_dir, f'sub-{participant}', 'anat', fname)
                 else:
                     gm_prob = None
 
                 ##### RUN PREPROCESSING #####
                 data, run_idx = preprocess(funcs, mask=gm_prob, space=space, tr=tr, logger=logger)
 
-
+    ##### </end processing loop> #####
 
 if __name__ == '__main__':
 
