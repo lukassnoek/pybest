@@ -10,8 +10,6 @@ logging.basicConfig(
 
 logger = logging.getLogger('pybest')
 
-class Dataset:
-    pass
 
-def preprocess():
+def preprocess(funcs):
     pass

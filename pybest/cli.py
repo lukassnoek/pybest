@@ -122,8 +122,16 @@ def main(bids_dir, out_dir, fprep_dir, ricor_dir, participant_label, session, ta
                     ricors = sorted(glob(op.join(
                         ricor_dir, f'sub-{participant}', f'ses-{ses}', 'physio', f'*task-{task}_*_regressors.tsv'
                     )))
-                    logger.info(f"FOund {len(ricors)} RETROICOR files for task {task}")
-                
+                    logger.info(f"Found {len(ricors)} RETROICOR files for task {task}")
+
+                if 'fs' not in space:
+                    gm_prob = op.join(fprep_dir, f'sub-{participant}', 'anat', f'sub-{participant}_label-GM_probseg.nii.gz')
+                else:
+                    gm_prob = None
+
+                    
+
+
 
 if __name__ == '__main__':
 
