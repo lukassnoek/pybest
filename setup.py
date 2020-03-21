@@ -15,30 +15,30 @@ with open('README.md') as f:
 with open('requirements.txt') as f:
     REQUIRES = f.readlines()
 
-opts = dict(name=NAME,
-            maintainer=MAINTAINER,
-            maintainer_email=MAINTAINER_EMAIL,
-            description=DESCRIPTION,
-            long_description=LONG_DESCRIPTION,
-            url=URL,
-            download_url=DOWNLOAD_URL,
-            license=LICENSE,
-            classifiers=CLASSIFIERS,
-            author=AUTHOR,
-            author_email=AUTHOR_EMAIL,
-            platforms=PLATFORMS,
-            version=VERSION,
-            packages=PACKAGES,
-            package_data=PACKAGE_DATA,
-            install_requires=REQUIRES,
-            requires=REQUIRES,
-            #entry_points={
-            #    'console_scripts': [
-            #        'scanphyslog2bids = scanphyslog2bids.core:cmd_interface',
-            #        'add_header_to_physio_tsv = scanphyslog2bids.utils:add_header_to_physio_tsv'
-            #        ]
-            #    }
-            )
+opts = dict(
+    name=NAME,
+    maintainer=MAINTAINER,
+    maintainer_email=MAINTAINER_EMAIL,
+    description=DESCRIPTION,
+    long_description=LONG_DESCRIPTION,
+    url=URL,
+    download_url=DOWNLOAD_URL,
+    license=LICENSE,
+    classifiers=CLASSIFIERS,
+    author=AUTHOR,
+    author_email=AUTHOR_EMAIL,
+    platforms=PLATFORMS,
+    version=VERSION,
+    packages=PACKAGES,
+    package_data=PACKAGE_DATA,
+    install_requires=REQUIRES,
+    requires=REQUIRES,
+    entry_points={
+        'console_scripts': [
+            'pybest = pybest.cli.main',
+            ]
+        }
+)
 
 if __name__ == '__main__':
     setup(**opts)

@@ -36,3 +36,6 @@ In the root of the directory, run:
 ```
 
 This will download one Fmriprep-preprocessed subject with one session (with 8 runs), which includes preprocessed volume and surface (gifti) data, confounds, and events. Note, it's 6.6 GB, so it might take a while.
+
+### Installing
+To install, clone the repository and run `pip install -e .` (the `-e` flag will install a development version).
