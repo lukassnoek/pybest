@@ -11,12 +11,13 @@ from .signal_model import optimize_signal_model
 @click.argument('bids_dir')
 @click.argument('out_dir', default=None, required=False)
 @click.argument('fprep_dir', default=None, required=False)
+@click.argument('ricor_dir', default=None, required=False)
 @click.option('--participant-label', default=None, required=False)
 @click.option('--session', default=None, required=False)
 @click.option('--task', default=None)
 @click.option('--space', default='T1w')
 @click.option('--hemi', default='L')
-def main(bids_dir, out_dir, fprep_dir, participant_label, session, task, space, hemi):
+def main(bids_dir, out_dir, fprep_dir, ricor_dir, participant_label, session, task, space, hemi):
     """ Main API of pybest. """
 
     logger.info(f"Working on BIDS directory {bids_dir}")
@@ -33,6 +34,15 @@ def main(bids_dir, out_dir, fprep_dir, participant_label, session, task, space, 
             raise ValueError(f"Fmriprep directory {fprep_dir} does not exist.")
 
         logger.info(f"Setting Fmriprep directory to {fprep_dir}")
+
+    if ricor_dir is None:
+        ricor_dir = op.join(bids_dir, 'derivatives', 'physiology')
+        if not op.isdir(ricor_dir):
+            ricor_dir = None
+            logger.info("No RETROICOR directory, so assuming no physio data.")
+    
+    if ricor_dir is not None:
+        logger.info(f"Setting RETROICOR directory to {ricor_dir}")
 
     # Use all possible participants if not provided
     if participant_label is None:
