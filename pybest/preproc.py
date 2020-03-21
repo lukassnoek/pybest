@@ -6,8 +6,9 @@ from nistats.design_matrix import _cosine_drift as dct_set
 from .utils import _load_gifti
 
 
-def preprocess(funcs, mask, space, logger, high_pass=0.1, gm_thresh=0.9, tr=.7):
-    """ Preprocesses a set of functional files (either volumetric nifti or surface gifti).
+def preprocess_func(funcs, mask, space, logger, high_pass=0.1, gm_thresh=0.9, tr=.7):
+    """ Preprocesses a set of functional files (either volumetric nifti or
+    surface gifti); high-pass filter (DCT) and normalization only.
 
     Parameters
     ----------
@@ -25,6 +26,14 @@ def preprocess(funcs, mask, space, logger, high_pass=0.1, gm_thresh=0.9, tr=.7):
         Gray matter probability threshold (higher = included in binary mask)
     tr : float
         TR of scan (only relevant if space is fsaverage) in seconds
+
+    Returns
+    -------
+    data_ : np.ndarray
+        2D array (time x voxels) with run-wise concatenated data
+    run_idx_ : np.ndarray
+        1D array with run indices, [0, 0, 0, ... , 1, 1, 1, ... , R, R, R]
+        for R runs
     """
 
     if 'fs' not in space:  # no need for mask in surface files
@@ -48,7 +57,7 @@ def preprocess(funcs, mask, space, logger, high_pass=0.1, gm_thresh=0.9, tr=.7):
         mask = None
 
     logger.info("Starting preprocessing of functional data ... \n")
-    all_run_data, run_idx = [], []
+    data_, run_idx_ = [], []
     for i, func in enumerate(tqdm(funcs)):
 
         # Load data
@@ -69,20 +78,37 @@ def preprocess(funcs, mask, space, logger, high_pass=0.1, gm_thresh=0.9, tr=.7):
 
         # Clean data + save     
         data = signal.clean(data, detrend=True, standardize='zscore', confounds=hp_set)
-        all_run_data.append(data)
+        data_.append(data)
 
         # Add to run index
-        run_idx.append(np.ones(n_vol) * i)
+        run_idx_.append(np.ones(n_vol) * i)
 
     # Concatenate data in time dimension (or should we keep it in lists?)
-    all_run_data = np.vstack(all_run_data)
-    run_idx = np.concatenate(run_idx)
+    data_ = np.vstack(data_)
+    run_idx_ = np.concatenate(run_idx_)
 
     print('')  # for clean interface
 
     logger.info(
-        f"HP-filtered/normalized data has {all_run_data.shape[0]} timepoints "
-        f"(across {len(funcs)} runs) and {all_run_data.shape[1]} voxels"
+        f"HP-filtered/normalized data has {data_.shape[0]} timepoints "
+        f"(across {len(funcs)} runs) and {data_.shape[1]} voxels"
     )
 
-    return all_run_data, run_idx    
+    return data_, run_idx_
+
+
+def preprocess_conf(confs, ricors):
+    """ Preprocesses confounds by doing the following:
+    1. Horizontal concatenation of Fmriprep confounds and RETROICOR (if any)
+    2. Set NaNs to 0
+    3. High-pass the data (same as functional data)
+    4. PCA
+
+    Parameters
+    ----------
+
+    Returns
+    -------
+
+    """
+    pass

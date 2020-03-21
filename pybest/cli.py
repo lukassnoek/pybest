@@ -3,7 +3,7 @@ import click
 import os.path as op
 from glob import glob
 from .utils import logger
-from .preproc import preprocess
+from .preproc import preprocess_func, preprocess_conf
 from .noise_model import optimize_noise_model
 from .signal_model import optimize_signal_model
 
@@ -147,6 +147,8 @@ def main(bids_dir, out_dir, fprep_dir, ricor_dir, participant_label, session, ta
                         ricor_dir, f'sub-{participant}', f'ses-{ses}', 'physio', f'*task-{task}_*_regressors.tsv'
                     )))
                     logger.info(f"Found {len(ricors)} RETROICOR files for task {task}")
+                else:
+                    ricors = None
 
                 if 'fs' not in space:
                     fname = f'sub-{participant}_label-GM_probseg.nii.gz'
@@ -154,8 +156,11 @@ def main(bids_dir, out_dir, fprep_dir, ricor_dir, participant_label, session, ta
                 else:
                     gm_prob = None
 
-                ##### RUN PREPROCESSING #####
-                data, run_idx = preprocess(funcs, mask=gm_prob, space=space, tr=tr, logger=logger)
+                ##### <preprocessing> #####
+                func_data, run_idx = preprocess_func(funcs, mask=gm_prob, space=space, tr=tr, logger=logger)
+                conf_data = preprocess_conf(confs, ricors, logger=logger)
+
+                ##### </preprocessing> #####
 
     ##### </end processing loop> #####
 
