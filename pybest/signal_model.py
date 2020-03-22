@@ -22,7 +22,8 @@ Step 1: for run in runs:
 		Create LSA design, fit, compute R2; keep track of R2
 Step 2: compute median (mean?) R2 curve across HRF-models for each voxel and pick max for each voxel!
 """
-
+# this is dumb
+HTF_TS = pd.read_csv('pybest/data/hrf_ts.tsv', sep='\t').values[:, 1:]
 
 def compute_regressor(exp_condition, hrf_kernel, frame_times,
 					  oversampling=10, min_onset=0):
@@ -97,23 +98,22 @@ def get_regressor_matrix(HRF, frame_times, trial_types, onsets, stim_durs, modul
 	return regressor_matrix
 
 
-def optimize_signal_model(func_data, run_idx, onsets, trial_types, TR, stim_durs=None, modulations=None):
+def get_best_HRF(func_data, run_idx, onsets, trial_types, TR, stim_durs=None, modulations=None):
 
-	# TODO better solution than loading the tsv?
-	hrf_ts = pd.read_csv('pybest/data/hrf_ts.tsv', sep='\t').values[:, 1:]
-	n_HRFs = hrf_ts.shape[1]
+	# how many HRFs do we ahve
+	n_HRFs = HTF_TS.shape[1]
 
+	# make instance of standard scaler and our ridge
 	scaler = StandardScaler()
 	model = RidgeCV()
 
 	n_run = np.unique(run_idx).size
 
-
 	# Go to default settings with 1 second durations
 	# and 1s as scaling factors for all events
-	if stim_durs == None:
+	if np.all(stim_durs == None):
 		stim_durs = np.ones(len(onsets))
-	if modulations == None:
+	if np.all(modulations == None):
 		modulations = np.ones(len(onsets))
 
 	# Hard code this for now
@@ -129,12 +129,13 @@ def optimize_signal_model(func_data, run_idx, onsets, trial_types, TR, stim_durs
 
 	# timing of samples
 	frame_times = np.arange(n_vols) * TR
+
 	# pre-allocate HRF x VOXEL
 	r2s_hrf = np.zeros((n_HRFs, n_voxels))
 
 	# loop over HRFs
 	for i in range(n_HRFs):
-		HRF_kernel = hrf_ts[: ,i]
+		HRF_kernel = HTF_TS[: ,i]
 
 		# get regressor matrix for this HRF kernel
 		X = get_regressor_matrix(HRF_kernel, frame_times, trial_types, onsets,
@@ -163,39 +164,75 @@ def optimize_signal_model(func_data, run_idx, onsets, trial_types, TR, stim_durs
 	return best_HRF
 
 
-# create data
-data = np.random.random((900, 4))
-# demean data
-data = data - data.mean(0)
-# create run indicator, just one run for now
-run_idx = np.repeat([0, 1], 450)
-# define a few onsets
-onsets = np.array([4, 44, 100, 122, 166, 188, 242, 402])
-# its a single trial, so each onset is a new trial type
-trial_types = np.arange(len(onsets))
-# sluggish TR, just what we need
-TR = 1
-# test our function that only returns the regressors for now
-time = np.arange(data.shape[0]) * TR
+def optimize_signal_model(func_data, run_idx, onsets, trial_types, TR, stim_durs=None, modulations=None):
 
-# lets add signal based on one of the HRFs
-# TODO see if we recovered the HRF choice we made
-stim_durs = np.ones(len(onsets))
-modulations = np.ones(len(onsets))
-exp_condition = (onsets,
-				stim_durs,
-				modulations)
-frame_times = np.arange(data.shape[0]) * TR
-hrf_ts = pd.read_csv('pybest/data/hrf_ts.tsv', sep='\t').values[:, 1:]
-HRF = hrf_ts[:, 3]
 
-# get the regressor for this condition
-reg = compute_regressor(
-	exp_condition, HRF, frame_times,
-	oversampling=10/TR,
-	min_onset=0)
+	scaler = StandardScaler()
+	model = RidgeCV()
+	
+	# get indices of the best HRF per voxel
+	best_HRF = get_best_HRF(func_data, run_idx, onsets,
+							trial_types, TR, stim_durs=stim_durs, modulations=modulations)
+	
+	# fit voxels with individual HRFs
+	# So I could only think of one good way of doing this
+	# - Lets fit all voxels with the same HRF together instead of one voxel alone
+	HRF_idx = np.unique(best_HRF)
+	fitted_brain = np.zeros(func_data.shape)
 
-data = data + reg/1.2
-plt.plot(time, data[:, 0])
-plt.plot(time, reg/1.2)
-plt.show()
+	i = HRF_idx[0]
+
+	mask = best_HRF == i
+	
+	
+
+
+
+
+if __name__ == "__main__":
+	"""
+	Putting a unit test here for now
+	"""
+	# create data
+	n_vox = 4
+	func_data = np.random.random((900, n_vox))/10
+	# demean data
+	func_data -= func_data.mean(0)
+	# create run indicator, just one run for now
+	run_idx = np.repeat([0, 1], 450)
+	# define a few onsets
+	onsets = np.array([4, 44, 100, 122, 166, 188, 242, 402])
+	# its a single trial, so each onset is a new trial type
+	trial_types = np.arange(len(onsets))
+	# sluggish TR, just what we need
+	TR = 1
+	# test our function that only returns the regressors for now
+	time = np.arange(func_data.shape[0]) * TR
+
+	# lets add signal based on one of the HRFs
+	stim_durs = np.ones(len(onsets))
+	modulations = np.ones(len(onsets))
+	exp_condition = (onsets,
+					stim_durs,
+					modulations)
+	frame_times = np.arange(func_data.shape[0]) * TR
+	# lets pick an HRF for each voxel
+	hrfs = [1, 2, 2, 1]
+
+	for vox in range(n_vox):
+		HRF = HTF_TS[:, hrfs[vox]]
+
+		# get the regressor for this condition
+		reg = compute_regressor(
+			exp_condition, HRF, frame_times,
+			oversampling=10/TR,
+			min_onset=0)
+
+		func_data[:, vox] += reg.flatten()/1.2
+
+	best_HRF = get_best_HRF(func_data, run_idx, onsets, trial_types, TR, stim_durs=None, modulations=None)
+	assert np.all(best_HRF==i), "The chosen HRFs for the voxels isn't correct"
+
+	plt.plot(time, func_data[:, :2])
+	plt.plot(time, reg/1.2)
+	plt.show()
