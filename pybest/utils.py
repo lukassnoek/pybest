@@ -42,6 +42,12 @@ class TqdmToLogger(io.StringIO):
 tqdm_out = TqdmToLogger(logger, level=logging.INFO)
 
 
+def check_parameters(space, tr):
+
+    if 'fs' in space and tr is None:
+        raise ValueError("TR (--tr) needs to be set when using surface data (--space fs*)!")
+
+
 def set_defaults(bids_dir, out_dir, fprep_dir, ricor_dir, work_dir, subject, logger):
 
     if not op.isdir(bids_dir):

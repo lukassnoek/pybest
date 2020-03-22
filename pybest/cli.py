@@ -1,9 +1,11 @@
 import os
 import click
 import os.path as op
+import numpy as np
 import nibabel as nib
 from glob import glob
-from .utils import logger, set_defaults, find_exp_parameters, find_data
+from .utils import logger, check_parameters, set_defaults
+from .utils import find_exp_parameters, find_data
 from .preproc import preprocess_func, preprocess_conf
 from .preproc import load_preproc_data, save_preproc_data
 
@@ -24,7 +26,7 @@ from .preproc import load_preproc_data, save_preproc_data
 @click.option('--high-pass', default=0.1, show_default=True)
 @click.option('--savgol-order', default=4, show_default=True)
 @click.option('--hemi', type=click.Choice(['L', 'R']), default='L', show_default=True)
-@click.option('--tr', default=None, show_default=True)
+@click.option('--tr', default=None, type=click.FLOAT, show_default=True)
 @click.option('--nthreads', default=1, show_default=True)
 def main(bids_dir, out_dir, fprep_dir, ricor_dir, subject, work_dir, start_from,
          session, task, space, gm_thresh, high_pass_type, high_pass, savgol_order, hemi, tr, nthreads):
@@ -34,6 +36,8 @@ def main(bids_dir, out_dir, fprep_dir, ricor_dir, subject, work_dir, start_from,
     bids_dir, out_dir, fprep_dir, ricor_dir, work_dir, subject = set_defaults(
         bids_dir, out_dir, fprep_dir, ricor_dir, work_dir, subject, logger
     )
+
+    check_parameters(space, tr)
 
     ##### find data #####
     subject, session, task = find_exp_parameters(bids_dir, fprep_dir, subject, session, task)
@@ -58,12 +62,12 @@ def main(bids_dir, out_dir, fprep_dir, ricor_dir, subject, work_dir, start_from,
                         funcs,
                         gm_prob,
                         space,
-                        logger,
                         high_pass_type,
                         high_pass,
                         savgol_order,
                         gm_thresh,
-                        tr
+                        tr,
+                        logger
                     )
                     
                     conf_data = preprocess_conf(
@@ -72,7 +76,8 @@ def main(bids_dir, out_dir, fprep_dir, ricor_dir, subject, work_dir, start_from,
                         high_pass_type,
                         high_pass,
                         savgol_order,
-                        tr
+                        tr,
+                        logger
                     )
                     logger.info("Finished preprocessing")
                     #save_preproc_data(sub, ses, task, func_data, conf_data, event_data, work_dir)
