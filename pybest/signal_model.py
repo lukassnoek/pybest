@@ -307,7 +307,7 @@ if __name__ == "__main__":
 		# get the regressor for this condition
 		reg = compute_regressor(
 			exp_condition, HRF, frame_times,
-			oversampling=10/TR,
+			oversampling=10 * TR,
 			min_onset=0)
 
 		func_data[:, vox] += reg.flatten()/1.2
