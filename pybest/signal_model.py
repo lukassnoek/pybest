@@ -9,20 +9,9 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import Ridge, RidgeCV
 from sklearn.model_selection import GroupKFold
 
-"""
-Input: 	2D (time x voxels) denoised signal array
-		run indicator array
-		TR
-		stim_dur - duration of stimuli (list)
-		onset - onset times
-		trial_type - if single trial its just np.arange(len(onset))
-
-Step 1: for run in runs:
-	for hrf_model in hrf_models:
-		Create LSA design, fit, compute R2; keep track of R2
-Step 2: compute median (mean?) R2 curve across HRF-models for each voxel and pick max for each voxel!
-"""
-# this is dumb
+# this is dumb, I know 
+# But I tried to manufactor Kendricks HRFs but no banana,
+# so lets load em
 HTF_TS = pd.read_csv('pybest/data/hrf_ts.tsv', sep='\t').values[:, 1:]
 
 def compute_regressor(exp_condition, hrf_kernel, frame_times,
@@ -144,7 +133,7 @@ def get_best_HRF(func_data, run_idx, onsets, trial_types, TR, stim_durs=None, mo
 		cv = GroupKFold(n_splits=n_run).split(X, func_data[:, 0], groups=run_idx)
 		
 		r2_scores = np.zeros(func_data.shape[1])
-		for train_idx, test_idx in tqdm(cv): # file=tqdmout
+		for train_idx, test_idx in tqdm(cv): # TODO: file=tqdmout
 			y_train = scaler.fit_transform(func_data[train_idx, :])
 			y_test = scaler.fit_transform(func_data[test_idx, :])
 
@@ -166,27 +155,55 @@ def get_best_HRF(func_data, run_idx, onsets, trial_types, TR, stim_durs=None, mo
 
 def optimize_signal_model(func_data, run_idx, onsets, trial_types, TR, stim_durs=None, modulations=None):
 
+	# Go to default settings with 1 second durations
+	# and 1s as scaling factors for all events
+	if np.all(stim_durs == None):
+		stim_durs = np.ones(len(onsets))
+	if np.all(modulations == None):
+		modulations = np.ones(len(onsets))
 
 	scaler = StandardScaler()
 	model = RidgeCV()
-	
+
 	# get indices of the best HRF per voxel
 	best_HRF = get_best_HRF(func_data, run_idx, onsets,
 							trial_types, TR, stim_durs=stim_durs, modulations=modulations)
 	
+	# get specifics
+	n_vols, n_voxels = func_data.shape
+	frame_times = np.arange(n_vols) * TR
+
+	exp_condition = (onsets,
+					stim_durs,
+					modulations)
+
 	# fit voxels with individual HRFs
 	# So I could only think of one good way of doing this
 	# - Lets fit all voxels with the same HRF together instead of one voxel alone
 	HRF_idx = np.unique(best_HRF)
 	fitted_brain = np.zeros(func_data.shape)
-
-	i = HRF_idx[0]
-
-	mask = best_HRF == i
 	
+	# over unique HRFs
+	for HRF in HRF_idx:
 	
+		# this is the HRF we are using
+		HRF_kernel = HTF_TS[:, HRF]
 
+		# make mask so we know which voxels have this HRF
+		mask = best_HRF == HRF
 
+		# get the regressor for these voxels
+		X = compute_regressor(
+			exp_condition, HRF_kernel, frame_times,
+			oversampling=10/TR,
+			min_onset=0)
+		
+		model.fit(X, func_data[:, mask])
+		fitted_brain[:, mask] = model.predict(X)
+
+	r2 = r2_score(func_data, fitted_brain, multioutput='raw_values')
+
+	return fitted_brain, r2
 
 
 if __name__ == "__main__":
@@ -217,7 +234,7 @@ if __name__ == "__main__":
 					modulations)
 	frame_times = np.arange(func_data.shape[0]) * TR
 	# lets pick an HRF for each voxel
-	hrfs = [1, 2, 2, 1]
+	hrfs = [1, 14, 3, 1]
 
 	for vox in range(n_vox):
 		HRF = HTF_TS[:, hrfs[vox]]
@@ -231,8 +248,4 @@ if __name__ == "__main__":
 		func_data[:, vox] += reg.flatten()/1.2
 
 	best_HRF = get_best_HRF(func_data, run_idx, onsets, trial_types, TR, stim_durs=None, modulations=None)
-	assert np.all(best_HRF==i), "The chosen HRFs for the voxels isn't correct"
-
-	plt.plot(time, func_data[:, :2])
-	plt.plot(time, reg/1.2)
-	plt.show()
+	assert np.all(best_HRF==hrfs), "The chosen HRFs for the voxels isn't correct"
