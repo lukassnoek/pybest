@@ -220,6 +220,9 @@ def load_preproc_data(sub, ses, task, work_dir):
     func_data = np.load(f_in + 'bold.npy')
     conf_data = pd.read_csv(f_in + 'conf.tsv', sep='\t')
     event_data = pd.read_csv(f_in + 'events.tsv', sep='\t')
+
+    mask = nib.load(f_in + 'mask.nii.gz')
+
     run_idx = np.load(op.join(in_dir, 'run_idx.npy'))
 
-    return func_data, conf_data, event_data, run_idx
+    return func_data, conf_data, event_data, mask, run_idx

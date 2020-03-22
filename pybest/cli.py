@@ -86,11 +86,11 @@ def main(bids_dir, out_dir, fprep_dir, ricor_dir, subject, work_dir, start_from,
                 
                 # If we did preprocessing already ...
                 if start_from == 'noiseproc':
-                    func_data, conf_data, event_data, run_idx = load_preproc_data(sub, ses, task, work_dir)
+                    func_data, conf_data, event_data, mask, run_idx = load_preproc_data(sub, ses, task, work_dir)
                 
                 # ... and didn't do noiseprocessing yet ...
                 if not start_from == 'signalproc':
-                    run_noise_processing()
+                    func_data = run_noise_processing(func_data, conf_data, run_idx, mask, work_dir)
                 else:
                     # If we did, load the denoised data
                     #func_data, event_data = load_denoised_data(sub, ses, task, workdir)
