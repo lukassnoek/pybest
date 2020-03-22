@@ -298,6 +298,7 @@ if __name__ == "__main__":
 					stim_durs,
 					modulations)
 	frame_times = np.arange(func_data.shape[0]) * TR
+	
 	# lets pick an HRF for each voxel
 	hrfs = np.random.choice(np.arange(20), n_vox)
 
