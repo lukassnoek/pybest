@@ -7,7 +7,8 @@ from nistats.design_matrix import _cosine_drift as dct_set
 from .utils import _load_gifti, tqdm_out
 
 
-def preprocess_func(funcs, mask, space, logger, high_pass_type, high_pass, gm_thresh, tr):
+def preprocess_func(funcs, mask, space, logger, high_pass_type, high_pass,
+                    savgol_order, gm_thresh, tr):
     """ Preprocesses a set of functional files (either volumetric nifti or
     surface gifti); high-pass filter (DCT) and normalization only.
 
@@ -25,6 +26,8 @@ def preprocess_func(funcs, mask, space, logger, high_pass_type, high_pass, gm_th
         Either 'dct' or 'savgol'
     high_pass : float
         High-pass cutoff (in Hz)
+    savgol_order : int
+        Savitsky-Golay polyorder (default: 4)
     gm_thresh : float
         Gray matter probability threshold (higher = included in binary mask)
     tr : float
@@ -60,6 +63,14 @@ def preprocess_func(funcs, mask, space, logger, high_pass_type, high_pass, gm_th
         mask = None
 
     logger.info("Starting preprocessing of functional data ... ")
+
+    if high_pass_type == 'savgol':
+        window = int(np.round((1/high_pass) / tr))
+        logger.info(
+            f"Using Savitsky-Golay HP filter with window {int(np.round(1/high_pass))} seconds "
+            f"and polyorder {savgol_order}"
+        )
+
     data_, run_idx_ = [], []
     for i, func in enumerate(tqdm(funcs, file=tqdm_out)):
 
@@ -69,8 +80,6 @@ def preprocess_func(funcs, mask, space, logger, high_pass_type, high_pass, gm_th
         else:
             # Mask data and extract stuff
             data = masking.apply_mask(func, mask)
-            hdr = nib.load(func).header
-            tr = hdr['pixdim'][4]
 
         # By now, data is a 2D array (time x voxels)
         n_vol = data.shape[0]
@@ -78,10 +87,9 @@ def preprocess_func(funcs, mask, space, logger, high_pass_type, high_pass, gm_th
 
         # Create high-pass filter and clean
         if high_pass_type == 'dct':
-            dct_set = dct_set(high_pass, frame_times)[:, :-1]  # remove intercept
-            data = signal.clean(data, detrend=True, standardize='zscore', confounds=dct_set)
+            hp_set = dct_set(high_pass, frame_times)[:, :-1]  # remove intercept
+            data = signal.clean(data, detrend=True, standardize='zscore', confounds=hp_set)
         else:  # savgol, hardcode polyorder
-            window = int(np.round(high_pass / tr))
             hp_sig = savgol_filter(data, window_length=window, polyorder=4, axis=0)
             data -= hp_sig
             data = (data - data.mean(axis=0)) / data.std(axis=0)
@@ -103,7 +111,7 @@ def preprocess_func(funcs, mask, space, logger, high_pass_type, high_pass, gm_th
     return data_, run_idx_
 
 
-def preprocess_conf(confs, ricors):
+def preprocess_conf(confs, ricors, high_pass_type, high_pass, savgol_order, tr):
     """ Preprocesses confounds by doing the following:
     1. Horizontal concatenation of Fmriprep confounds and RETROICOR (if any)
     2. Set NaNs to 0
@@ -117,4 +125,12 @@ def preprocess_conf(confs, ricors):
     -------
 
     """
+    pass
+
+
+def save_preproc_data(sub, ses, task, funcs, confs, events, mask, work_dir):
+    pass
+
+
+def load_preproc_data(sub, ses, task, work_dir):
     pass

@@ -1,11 +1,11 @@
 import os
 import click
 import os.path as op
+import nibabel as nib
 from glob import glob
-from .utils import logger
+from .utils import logger, set_defaults, find_exp_parameters, find_data
 from .preproc import preprocess_func, preprocess_conf
-from .noise_model import optimize_noise_model
-from .signal_model import optimize_signal_model
+from .preproc import load_preproc_data, save_preproc_data
 
 
 @click.command()
@@ -13,168 +13,76 @@ from .signal_model import optimize_signal_model
 @click.argument('out_dir', default=None, required=False)
 @click.argument('fprep_dir', default=None, required=False)
 @click.argument('ricor_dir', default=None, required=False)
-@click.argument('participant-label', nargs=-1, required=False)
+@click.argument('subject', nargs=-1, required=False)
+@click.option('--work-dir', default=None, required=False)
+@click.option('--start-from', type=click.Choice(['preproc', 'noiseproc', 'signalproc']), default='preproc', required=False)
 @click.option('--session', default=None, required=False)
 @click.option('--task', default=None)
 @click.option('--space', default='T1w', show_default=True)
 @click.option('--gm-thresh', default=0.9, show_default=True)
 @click.option('--high-pass-type', type=click.Choice(['dct', 'savgol']), default='dct', show_default=True)
 @click.option('--high-pass', default=0.1, show_default=True)
+@click.option('--savgol-order', default=4, show_default=True)
 @click.option('--hemi', type=click.Choice(['L', 'R']), default='L', show_default=True)
-@click.option('--tr', default=0.7, show_default=True)
+@click.option('--tr', default=None, show_default=True)
 @click.option('--nthreads', default=1, show_default=True)
-def main(bids_dir, out_dir, fprep_dir, ricor_dir, participant_label, session, task,
-         space, gm_thresh, high_pass_type, high_pass, hemi, tr, nthreads):
+def main(bids_dir, out_dir, fprep_dir, ricor_dir, subject, work_dir, start_from,
+         session, task, space, gm_thresh, high_pass_type, high_pass, savgol_order, hemi, tr, nthreads):
     """ Main API of pybest. """
 
-    ##### <set defaults> #####
-    if not op.isdir(bids_dir):
-        raise ValueError(f"BIDS directory {bids_dir} does not exist!")
+    ##### set defaults #####
+    bids_dir, out_dir, fprep_dir, ricor_dir, work_dir, subject = set_defaults(
+        bids_dir, out_dir, fprep_dir, ricor_dir, work_dir, subject, logger
+    )
 
-    logger.info(f"Working on BIDS directory {bids_dir}")
-
-    if out_dir is None:  # Set default out_dir
-        out_dir = op.join(bids_dir, 'derivatives', 'pybest')
-        if not op.isdir(out_dir):
-            os.makedirs(out_dir)
-
-        logger.info(f"Setting output directory to {out_dir}")
-
-    if fprep_dir is None:
-        fprep_dir = op.join(bids_dir, 'derivatives', 'fmriprep')
-        if not op.isdir(fprep_dir):
-            raise ValueError(f"Fmriprep directory {fprep_dir} does not exist.")
-
-        logger.info(f"Setting Fmriprep directory to {fprep_dir}")
-
-    if ricor_dir is None:
-        ricor_dir = op.join(bids_dir, 'derivatives', 'physiology')
-        if not op.isdir(ricor_dir):
-            ricor_dir = None
-            logger.info("No RETROICOR directory, so assuming no physio data.")
-    
-    if ricor_dir is not None:
-        logger.info(f"Setting RETROICOR directory to {ricor_dir}")
-
-    if not participant_label:
-        participant_label = None
-    
-    ##### </set defaults> #####
-
-    ##### <gather data> #####
-    # Very ugly code, but necessary 
-
-    # Use all possible participants if not provided
-    if participant_label is None:
-        participant_label = [
-            op.basename(s).split('-')[1] for s in
-            sorted(glob(op.join(fprep_dir, 'sub-*')))
-            if op.isdir(s)
-        ]
-        logger.info(f"Found {len(participant_label)} participant(s)")
-    else:
-        # Use a list by default
-        participant_label = [participant_label]
-
-    # Use all sessions if not provided
-    if session is None:
-        session = []
-        for participant in participant_label:
-            this_sess = [
-                op.basename(s).split('-')[1] for s in
-                sorted(glob(op.join(fprep_dir, f'sub-{participant}', 'ses-*')))
-                if op.isdir(s)
-            ]
-            session.append(this_sess)
-            logger.info(f"Found {len(this_sess)} session(s) for sub-{participant}")
-    else:
-        session = [session] * len(participant_label)
-
-    # Use all tasks if no explicit task is provided
-    if task is None:
-        task = []
-        for participant, this_ses in zip(participant_label, session):
-            sub_tasks = []
-            for ses in this_ses:
-                
-                tmp = glob(op.join(
-                    bids_dir,
-                    f'sub-{participant}',
-                    f'ses-{ses}',
-                    'func',
-                    f'*_events.tsv'
-                ))
-
-                these_task = list(set(
-                    [op.basename(f).split('task-')[1].split('_')[0] for f in tmp]
-                ))
-        
-                sub_tasks.append(these_task)
-                logger.info(f"Found {len(these_task)} task(s) for sub-{participant} and ses-{ses}")
-
-            task.append(sub_tasks)
-    else:
-        task = [[task] * len(session)] * len(participant_label)
-
-    ##### </gather data> #####
-
-    # Set right "identifier" depending on fsaverage* or volumetric space
-    space_idf = f'hemi-{hemi}.func.gii' if 'fs' in space else 'desc-preproc_bold.nii.gz'
+    ##### find data #####
+    subject, session, task = find_exp_parameters(bids_dir, fprep_dir, subject, session, task)
 
     ##### <start processing loop> #####
-    for i, participant in enumerate(participant_label):
+    for i, sub in enumerate(subject):
         for ii, ses in enumerate(session[i]):
             for iii, task in enumerate(task[i][ii]):
-                logger.info(f"Starting process for sub-{participant}, ses-{ses}, task-{task}")
+                logger.info(f"Starting process for sub-{sub}, ses-{ses}, task-{task}")
 
-                # Gather funcs, confs, tasks
-                funcs = sorted(glob(op.join(
-                    fprep_dir, f'sub-{participant}', f'ses-{ses}', 'func', f'*task-{task}_*_space-{space}_{space_idf}'
-                )))
-                confs = sorted(glob(op.join(
-                    fprep_dir, f'sub-{participant}', f'ses-{ses}', 'func', f'*desc-confounds_regressors.tsv'
-                )))
-                events = sorted(glob(op.join(
-                    bids_dir, f'sub-{participant}', f'ses-{ses}', 'func', f'*task-{task}_*_events.tsv'
-                )))
-                if not all(len(funcs) == len(tmp) for tmp in [confs, events]):
-                    raise ValueError(
-                        f"Found unequal number of funcs ({len(funcs)}), confs ({len(confs)}), and events ({len(events)})."
-                    )
-                logger.info(f"Found {len(funcs)} runs for task {task}")
-
-                # Also find retroicor files
-                if ricor_dir is not None:
-                    ricors = sorted(glob(op.join(
-                        ricor_dir, f'sub-{participant}', f'ses-{ses}', 'physio', f'*task-{task}_*_regressors.tsv'
-                    )))
-                    logger.info(f"Found {len(ricors)} RETROICOR files for task {task}")
-                else:
-                    ricors = None
-
-                if 'fs' not in space:
-                    fname = f'sub-{participant}_label-GM_probseg.nii.gz'
-                    gm_prob = op.join(fprep_dir, f'sub-{participant}', 'anat', fname)
-                else:
-                    gm_prob = None
-
-                ##### <preprocessing> #####
-                func_data, run_idx = preprocess_func(
-                    funcs,
-                    gm_prob,
-                    space,
-                    logger,
-                    high_pass_type,
-                    high_pass,
-                    gm_thresh,
-                    tr
+                funcs, confs, events, ricors, gm_prob = find_data(
+                    sub, ses, task, space,  hemi, bids_dir, fprep_dir, ricor_dir
                 )
-                #conf_data = preprocess_conf(confs, ricors, logger)
 
-                ##### </preprocessing> #####
+                if tr is None:
+                    tr = np.round(nib.load(funcs[0]).header['pixdim'][4], 3)
+                    logger.info(f"TR is not set; extracted TR from first func is {tr}")
 
-    ##### </end processing loop> #####
-    logger.info("Finished preprocessing")
+                if start_from == 'preproc':
+                    ##### <preprocessing> #####
+                    func_data, run_idx = preprocess_func(
+                        funcs,
+                        gm_prob,
+                        space,
+                        logger,
+                        high_pass_type,
+                        high_pass,
+                        savgol_order,
+                        gm_thresh,
+                        tr
+                    )
+                    
+                    conf_data = preprocess_conf(
+                        confs,
+                        ricors,
+                        high_pass_type,
+                        high_pass,
+                        savgol_order,
+                        tr
+                    )
+                    logger.info("Finished preprocessing")
+                    #save_preproc_data(sub, ses, task, func_data, conf_data, event_data, work_dir)
+                elif start_from == 'noiseproc':
+                    #func_data, run_idx = load_preproc_data(sub, ses, task, work_dir)
+                    pass
+                #elif start_from == 'signalproc':
+                #    func_data, run_idx = load_denoised_data()
+                #else:
+                #    raise ValueError("Parameter '--start-from' should be 'preproc', 'noiseproc' or 'signalproc'!")
 
 if __name__ == '__main__':
 
