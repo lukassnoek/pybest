@@ -9,9 +9,17 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import Ridge, RidgeCV
 from sklearn.model_selection import GroupKFold
 
-# this is dumb, I know 
-# But I tried to manufactor Kendricks HRFs but no banana,
-# so lets load em
+"""
+TODO:
+* Fix paths
+* Make sure arguments are the correct data types
+"""
+
+"""
+This is dumb, I know 
+But I tried to manufactor Kendricks HRFs but no banana,
+so lets load em
+"""
 HTF_TS = pd.read_csv('pybest/data/hrf_ts.tsv', sep='\t').values[:, 1:]
 
 def compute_regressor(exp_condition, hrf_kernel, frame_times,
@@ -65,6 +73,24 @@ def compute_regressor(exp_condition, hrf_kernel, frame_times,
 	return computed_regressors
 
 def get_regressor_matrix(HRF, frame_times, trial_types, onsets, stim_durs, modulations, oversampling=20, min_onset=0):
+	"""This function returns the design matrix 
+	
+	Arguments:
+		HRF {[array-like]} -- The HRF kernel
+		frame_times {array-like} -- the time points for each volume
+		trial_types {array-like} -- list of length of events, condition identifier values for each onset
+		onsets {array-like} -- list of length of events, onset time in seconds of each event
+		stim_durs {[type]} -- list of length of events, length of each event
+		modulations {[type]} -- list of length of events, modulation of each event
+	
+	Keyword Arguments:
+		oversampling {int} -- oversampling factor to perform the convolution, default 20
+		min_onset {int} -- minimal onset relative to frame_times[0] (in seconds)
+		events that start before frame_times[0] + min_onset are not considered, default 0
+	
+	Returns:
+		[array-like] -- Design matrix which has been convolved with the HRF kernel provided (and with each column orthogonlized)
+	"""
 	# loop over conditions
 	regressor_matrix = None
 	for condition in np.unique(trial_types):
@@ -88,6 +114,23 @@ def get_regressor_matrix(HRF, frame_times, trial_types, onsets, stim_durs, modul
 
 
 def get_best_HRF(func_data, run_idx, onsets, trial_types, TR, stim_durs=None, modulations=None):
+	"""We fit each available HRF on each voxel in a cross-validated fashion. We return the HRF indices 
+	that corresponds to the best fitting HRF for each voxel
+	
+	Arguments:
+		func_data {[array]} -- Functional data SAMPLES x VOXELS
+		run_idx {[array]} -- list of run indices
+		onsets {array-like} -- list of length of events, onset time in seconds of each event
+		trial_types {array-like} -- list of length of events, condition identifier values for each onset
+		TR {float} -- Repetition time for functional data
+	
+	Keyword Arguments:
+		stim_durs {[type]} -- list of length of events, length of each event
+		modulations {[type]} -- list of length of events, modulation of each event
+	
+	Returns:
+		[array] -- the indices for the best fitting HRF for each voxel
+	"""
 
 	# how many HRFs do we ahve
 	n_HRFs = HTF_TS.shape[1]
@@ -130,10 +173,12 @@ def get_best_HRF(func_data, run_idx, onsets, trial_types, TR, stim_durs=None, mo
 		X = get_regressor_matrix(HRF_kernel, frame_times, trial_types, onsets,
 								stim_durs, modulations, oversampling=oversampling, min_onset=0)
 
+		# split data based on run_idx (leave one out)
 		cv = GroupKFold(n_splits=n_run).split(X, func_data[:, 0], groups=run_idx)
 		
+		# loop over test and training sets
 		r2_scores = np.zeros(func_data.shape[1])
-		for train_idx, test_idx in tqdm(cv): # TODO: file=tqdmout
+		for train_idx, test_idx in tqdm(cv, desc=f'Calculating R2 for HRF {i}'): # TODO: file=tqdmout
 			y_train = scaler.fit_transform(func_data[train_idx, :])
 			y_test = scaler.fit_transform(func_data[test_idx, :])
 
@@ -154,6 +199,23 @@ def get_best_HRF(func_data, run_idx, onsets, trial_types, TR, stim_durs=None, mo
 
 
 def optimize_signal_model(func_data, run_idx, onsets, trial_types, TR, stim_durs=None, modulations=None):
+	"""Fits the data with the preferred HRF of each voxel
+	
+	Arguments:
+		func_data {[array]} -- Functional data SAMPLES x VOXELS
+		run_idx {[array]} -- list of run indices
+		onsets {array-like} -- list of length of events, onset time in seconds of each event
+		trial_types {array-like} -- list of length of events, condition identifier values for each onset
+		TR {float} -- Repetition time for functional data
+	
+	Keyword Arguments:
+		stim_durs {[type]} -- list of length of events, length of each event
+		modulations {[type]} -- list of length of events, modulation of each event
+	
+	Returns:
+		fitted_brain {array} -- The data fit using preferred HRFs for each voxel, of size func_data.shape
+		r2 {array} -- The R-square for each voxel
+	"""
 
 	# Go to default settings with 1 second durations
 	# and 1s as scaling factors for all events
@@ -210,13 +272,16 @@ if __name__ == "__main__":
 	"""
 	Putting a unit test here for now
 	"""
+	# for consistency
+	np.random.seed(1)
+
 	# create data
-	n_vox = 4
+	n_vox = 400
 	func_data = np.random.random((900, n_vox))/10
 	# demean data
 	func_data -= func_data.mean(0)
 	# create run indicator, just one run for now
-	run_idx = np.repeat([0, 1], 450)
+	run_idx = np.repeat([0, 1, 3], 300)
 	# define a few onsets
 	onsets = np.array([4, 44, 100, 122, 166, 188, 242, 402])
 	# its a single trial, so each onset is a new trial type
@@ -234,7 +299,7 @@ if __name__ == "__main__":
 					modulations)
 	frame_times = np.arange(func_data.shape[0]) * TR
 	# lets pick an HRF for each voxel
-	hrfs = [1, 14, 3, 1]
+	hrfs = np.random.choice(np.arange(20), n_vox)
 
 	for vox in range(n_vox):
 		HRF = HTF_TS[:, hrfs[vox]]
@@ -247,5 +312,11 @@ if __name__ == "__main__":
 
 		func_data[:, vox] += reg.flatten()/1.2
 
-	best_HRF = get_best_HRF(func_data, run_idx, onsets, trial_types, TR, stim_durs=None, modulations=None)
+	best_HRF = get_best_HRF(func_data, run_idx, onsets, trial_types,
+							TR, stim_durs=stim_durs, modulations=modulations)
 	assert np.all(best_HRF==hrfs), "The chosen HRFs for the voxels isn't correct"
+
+	# This is what the function call looks like
+	# maybe its best to send in a 
+	fitted_brain, r2 = optimize_signal_model(func_data, run_idx, onsets,
+							trial_types, TR, stim_durs=stim_durs, modulations=modulations)
