@@ -17,12 +17,14 @@ from .signal_model import optimize_signal_model
 @click.option('--session', default=None, required=False)
 @click.option('--task', default=None)
 @click.option('--space', default='T1w', show_default=True)
+@click.option('--gm-thresh', default=0.9, show_default=True)
+@click.option('--high-pass-type', type=click.Choice(['dct', 'savgol']), default='dct', show_default=True)
 @click.option('--high-pass', default=0.1, show_default=True)
 @click.option('--hemi', type=click.Choice(['L', 'R']), default='L', show_default=True)
 @click.option('--tr', default=0.7, show_default=True)
 @click.option('--nthreads', default=1, show_default=True)
 def main(bids_dir, out_dir, fprep_dir, ricor_dir, participant_label, session, task,
-         space, high_pass, hemi, tr, nthreads):
+         space, gm_thresh, high_pass_type, high_pass, hemi, tr, nthreads):
     """ Main API of pybest. """
 
     ##### <set defaults> #####
@@ -157,12 +159,22 @@ def main(bids_dir, out_dir, fprep_dir, ricor_dir, participant_label, session, ta
                     gm_prob = None
 
                 ##### <preprocessing> #####
-                func_data, run_idx = preprocess_func(funcs, mask=gm_prob, space=space, tr=tr, logger=logger)
-                conf_data = preprocess_conf(confs, ricors, logger=logger)
+                func_data, run_idx = preprocess_func(
+                    funcs,
+                    gm_prob,
+                    space,
+                    logger,
+                    high_pass_type,
+                    high_pass,
+                    gm_thresh,
+                    tr
+                )
+                #conf_data = preprocess_conf(confs, ricors, logger)
 
                 ##### </preprocessing> #####
 
     ##### </end processing loop> #####
+    logger.info("Finished preprocessing")
 
 if __name__ == '__main__':
 

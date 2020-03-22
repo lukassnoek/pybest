@@ -2,11 +2,12 @@ import numpy as np
 import nibabel as nib
 from tqdm import tqdm
 from nilearn import image, masking, signal
+from scipy.signal import savgol_filter
 from nistats.design_matrix import _cosine_drift as dct_set
-from .utils import _load_gifti
+from .utils import _load_gifti, tqdm_out
 
 
-def preprocess_func(funcs, mask, space, logger, high_pass=0.1, gm_thresh=0.9, tr=.7):
+def preprocess_func(funcs, mask, space, logger, high_pass_type, high_pass, gm_thresh, tr):
     """ Preprocesses a set of functional files (either volumetric nifti or
     surface gifti); high-pass filter (DCT) and normalization only.
 
@@ -20,6 +21,8 @@ def preprocess_func(funcs, mask, space, logger, high_pass=0.1, gm_thresh=0.9, tr
         Name of space ('T1w', 'fsaverage{5,6}', 'MNI152NLin2009cAsym')
     logger : logging object
         Main logger (from cli.py)
+    high_pass_type : str
+        Either 'dct' or 'savgol'
     high_pass : float
         High-pass cutoff (in Hz)
     gm_thresh : float
@@ -56,9 +59,9 @@ def preprocess_func(funcs, mask, space, logger, high_pass=0.1, gm_thresh=0.9, tr
         # If fsaverage{5,6} space, don't use any mask
         mask = None
 
-    logger.info("Starting preprocessing of functional data ... \n")
+    logger.info("Starting preprocessing of functional data ... ")
     data_, run_idx_ = [], []
-    for i, func in enumerate(tqdm(funcs)):
+    for i, func in enumerate(tqdm(funcs, file=tqdm_out)):
 
         # Load data
         if 'fs' in space:  # assume gifti
@@ -73,11 +76,16 @@ def preprocess_func(funcs, mask, space, logger, high_pass=0.1, gm_thresh=0.9, tr
         n_vol = data.shape[0]
         frame_times = np.linspace(0.5 * tr, n_vol * (tr + 0.5), n_vol, endpoint=False)    
 
-        # Create high-pass filter set
-        hp_set = dct_set(high_pass, frame_times)[:, :-1]  # remove intercept
+        # Create high-pass filter and clean
+        if high_pass_type == 'dct':
+            dct_set = dct_set(high_pass, frame_times)[:, :-1]  # remove intercept
+            data = signal.clean(data, detrend=True, standardize='zscore', confounds=dct_set)
+        else:  # savgol, hardcode polyorder
+            window = int(np.round(high_pass / tr))
+            hp_sig = savgol_filter(data, window_length=window, polyorder=4, axis=0)
+            data -= hp_sig
+            data = (data - data.mean(axis=0)) / data.std(axis=0)
 
-        # Clean data + save     
-        data = signal.clean(data, detrend=True, standardize='zscore', confounds=hp_set)
         data_.append(data)
 
         # Add to run index
@@ -86,8 +94,6 @@ def preprocess_func(funcs, mask, space, logger, high_pass=0.1, gm_thresh=0.9, tr
     # Concatenate data in time dimension (or should we keep it in lists?)
     data_ = np.vstack(data_)
     run_idx_ = np.concatenate(run_idx_)
-
-    print('')  # for clean interface
 
     logger.info(
         f"HP-filtered/normalized data has {data_.shape[0]} timepoints "
