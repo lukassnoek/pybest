@@ -6,9 +6,9 @@ import nibabel as nib
 from glob import glob
 from .utils import logger, check_parameters, set_defaults
 from .utils import find_exp_parameters, find_data
-from .preproc import preprocess_func, preprocess_conf
+from .preproc import preprocess_funcs, preprocess_confs, preprocess_events
 from .preproc import load_preproc_data, save_preproc_data
-
+from .noise_model import run_noise_processing
 
 @click.command()
 @click.argument('bids_dir')
@@ -57,8 +57,7 @@ def main(bids_dir, out_dir, fprep_dir, ricor_dir, subject, work_dir, start_from,
                     logger.info(f"TR is not set; extracted TR from first func is {tr}")
 
                 if start_from == 'preproc':
-                    ##### <preprocessing> #####
-                    func_data, run_idx = preprocess_func(
+                    func_data, run_idx, mask = preprocess_funcs(
                         funcs,
                         gm_prob,
                         space,
@@ -70,7 +69,7 @@ def main(bids_dir, out_dir, fprep_dir, ricor_dir, subject, work_dir, start_from,
                         logger
                     )
                     
-                    conf_data = preprocess_conf(
+                    conf_data = preprocess_confs(
                         confs,
                         ricors,
                         high_pass_type,
@@ -79,15 +78,24 @@ def main(bids_dir, out_dir, fprep_dir, ricor_dir, subject, work_dir, start_from,
                         tr,
                         logger
                     )
-                    logger.info("Finished preprocessing")
-                    #save_preproc_data(sub, ses, task, func_data, conf_data, event_data, work_dir)
-                elif start_from == 'noiseproc':
-                    #func_data, run_idx = load_preproc_data(sub, ses, task, work_dir)
+                    
+                    event_data = preprocess_events(events, logger)
+                    
+                    logger.info("Saving preprocessed data")
+                    save_preproc_data(sub, ses, task, func_data, conf_data, event_data, mask, run_idx, work_dir)
+                
+                # If we did preprocessing already ...
+                if start_from == 'noiseproc':
+                    func_data, conf_data, event_data, run_idx = load_preproc_data(sub, ses, task, work_dir)
+                
+                # ... and didn't do noiseprocessing yet ...
+                if not start_from == 'signalproc':
+                    run_noise_processing()
+                else:
+                    # If we did, load the denoised data
+                    #func_data, event_data = load_denoised_data(sub, ses, task, workdir)
                     pass
-                #elif start_from == 'signalproc':
-                #    func_data, run_idx = load_denoised_data()
-                #else:
-                #    raise ValueError("Parameter '--start-from' should be 'preproc', 'noiseproc' or 'signalproc'!")
+
 
 if __name__ == '__main__':
 

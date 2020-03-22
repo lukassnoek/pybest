@@ -53,7 +53,7 @@ def set_defaults(bids_dir, out_dir, fprep_dir, ricor_dir, work_dir, subject, log
     if not op.isdir(bids_dir):
         raise ValueError(f"BIDS directory {bids_dir} does not exist!")
 
-    logger.info(f"Working on BIDS directory {bids_dir}")
+    logger.info(f"Using BIDS directory {bids_dir}")
 
     if out_dir is None:  # Set default out_dir
         out_dir = op.join(bids_dir, 'derivatives', 'pybest')
