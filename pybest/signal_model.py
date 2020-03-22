@@ -4,6 +4,10 @@ from nistats.design_matrix import make_design_matrix
 from nistats.hemodynamic_models import _sample_condition,  _orthogonalize, _resample_regressor
 import matplotlib.pyplot as plt
 from sklearn.metrics import r2_score
+from tqdm import tqdm
+from sklearn.preprocessing import StandardScaler
+from sklearn.linear_model import Ridge, RidgeCV
+from sklearn.model_selection import GroupKFold
 
 """
 Input: 	2D (time x voxels) denoised signal array
@@ -93,11 +97,17 @@ def get_regressor_matrix(HRF, frame_times, trial_types, onsets, stim_durs, modul
 	return regressor_matrix
 
 
-def optimize_signal_model(data, run_indicator, onsets, trial_types, TR, stim_durs=None, modulations=None):
+def optimize_signal_model(func_data, run_idx, onsets, trial_types, TR, stim_durs=None, modulations=None):
 
 	# TODO better solution than loading the tsv?
 	hrf_ts = pd.read_csv('pybest/data/hrf_ts.tsv', sep='\t').values[:, 1:]
 	n_HRFs = hrf_ts.shape[1]
+
+	scaler = StandardScaler()
+	model = RidgeCV()
+
+	n_run = np.unique(run_idx).size
+
 
 	# Go to default settings with 1 second durations
 	# and 1s as scaling factors for all events
@@ -111,16 +121,11 @@ def optimize_signal_model(data, run_indicator, onsets, trial_types, TR, stim_dur
 	# our HRF kernels are sampled at 10 hz
 	oversampling = 10 * TR
 
-	# TODO check so we have at least 2 runs?
-	runs = np.unique(run_indicator)
+	# Check so we have at least 2 runs?
+	assert np.unique(run_idx).size > 1, "You need at least 2 runs"
 
-	# loop over runs
-	r = runs[0]
-	r_rest = runs[]
-
-	# get specific run data 
-	run_data = data[run_indicator==r, :]
-	n_vols, n_voxels = run_data.shape
+	# get specifics
+	n_vols, n_voxels = func_data.shape
 
 	# timing of samples
 	frame_times = np.arange(n_vols) * TR
@@ -130,15 +135,28 @@ def optimize_signal_model(data, run_indicator, onsets, trial_types, TR, stim_dur
 	# loop over HRFs
 	for i in range(n_HRFs):
 		HRF_kernel = hrf_ts[: ,i]
+
 		# get regressor matrix for this HRF kernel
 		X = get_regressor_matrix(HRF_kernel, frame_times, trial_types, onsets,
 								stim_durs, modulations, oversampling=oversampling, min_onset=0)
 
-		betas = np.linalg.inv(X.T @ X) @ (X.T @ run_data)
-		fit = X @ betas 
+		cv = GroupKFold(n_splits=n_run).split(X, func_data[:, 0], groups=run_idx)
+		
+		r2_scores = np.zeros(func_data.shape[1])
+		for train_idx, test_idx in tqdm(cv): # file=tqdmout
+			y_train = scaler.fit_transform(func_data[train_idx, :])
+			y_test = scaler.fit_transform(func_data[test_idx, :])
 
-		r2s_hrf[i, :] = r2_score(run_data, fit, multioutput='raw_values')
+			X_train = scaler.fit_transform(X[train_idx, :])
+			X_test = scaler.fit_transform(X[test_idx, :])
 
+			model.fit(X_train, y_train)
+			# Overfitting to check
+			y_pred = model.predict(X_train)
+			r2_scores += r2_score(y_train, y_pred, multioutput='raw_values')
+
+		r2s_hrf[i, :] = r2_scores / n_run
+	
 	# pick best HRF for each voxel
 	best_HRF = r2s_hrf.argmax(0)
 
@@ -150,7 +168,7 @@ data = np.random.random((900, 4))
 # demean data
 data = data - data.mean(0)
 # create run indicator, just one run for now
-run_indicator = np.zeros(len(data))
+run_idx = np.repeat([0, 1], 450)
 # define a few onsets
 onsets = np.array([4, 44, 100, 122, 166, 188, 242, 402])
 # its a single trial, so each onset is a new trial type
