@@ -3,6 +3,7 @@ import pandas as pd
 from nistats.design_matrix import make_design_matrix
 from nistats.hemodynamic_models import _sample_condition,  _orthogonalize, _resample_regressor
 import matplotlib.pyplot as plt
+from sklearn.metrics import r2_score
 
 """
 Input: 	2D (time x voxels) denoised signal array
@@ -96,6 +97,7 @@ def optimize_signal_model(data, run_indicator, onsets, trial_types, TR, stim_dur
 
 	# TODO better solution than loading the tsv?
 	hrf_ts = pd.read_csv('pybest/data/hrf_ts.tsv', sep='\t').values[:, 1:]
+	n_HRFs = hrf_ts.shape[1]
 
 	# Go to default settings with 1 second durations
 	# and 1s as scaling factors for all events
@@ -114,39 +116,49 @@ def optimize_signal_model(data, run_indicator, onsets, trial_types, TR, stim_dur
 
 	# loop over runs
 	r = runs[0]
+	r_rest = runs[]
 
 	# get specific run data 
-	run = data[run_indicator==r, :]
-	n = sum(run_indicator==r)
+	run_data = data[run_indicator==r, :]
+	n_vols, n_voxels = run_data.shape
 
 	# timing of samples
-	frame_times = np.arange(n) * TR
-	
+	frame_times = np.arange(n_vols) * TR
+	# pre-allocate HRF x VOXEL
+	r2s_hrf = np.zeros((n_HRFs, n_voxels))
+
 	# loop over HRFs
-	HRF = hrf_ts[: ,10]
-	
-	# get regressor matrix for this HRF kernel
-	regressor_matrix = get_regressor_matrix(HRF, frame_times, trial_types, onsets,
-											stim_durs, modulations, oversampling=oversampling, min_onset=min_onset)
-	"""
-	TODO  
-	1. Fit data for each HRF per voxel
-	2. get the best HRF per voxel based on R2
-	"""
-	return regressor_matrix
+	for i in range(n_HRFs):
+		HRF_kernel = hrf_ts[: ,i]
+		# get regressor matrix for this HRF kernel
+		X = get_regressor_matrix(HRF_kernel, frame_times, trial_types, onsets,
+								stim_durs, modulations, oversampling=oversampling, min_onset=0)
+
+		betas = np.linalg.inv(X.T @ X) @ (X.T @ run_data)
+		fit = X @ betas 
+
+		r2s_hrf[i, :] = r2_score(run_data, fit, multioutput='raw_values')
+
+	# pick best HRF for each voxel
+	best_HRF = r2s_hrf.argmax(0)
+
+	return best_HRF
 
 
 # create data
-data = np.random.random((400, 4))
+data = np.random.random((900, 4))
+# demean data
+data = data - data.mean(0)
 # create run indicator, just one run for now
 run_indicator = np.zeros(len(data))
 # define a few onsets
-onsets = np.array([4, 44, 100, 122, 166, 188, 242, 600, 650])
+onsets = np.array([4, 44, 100, 122, 166, 188, 242, 402])
 # its a single trial, so each onset is a new trial type
 trial_types = np.arange(len(onsets))
 # sluggish TR, just what we need
-TR = 2
+TR = 1
 # test our function that only returns the regressors for now
+time = np.arange(data.shape[0]) * TR
 
 # lets add signal based on one of the HRFs
 # TODO see if we recovered the HRF choice we made
@@ -162,18 +174,10 @@ HRF = hrf_ts[:, 3]
 # get the regressor for this condition
 reg = compute_regressor(
 	exp_condition, HRF, frame_times,
-	oversampling=1,
+	oversampling=10/TR,
 	min_onset=0)
 
 data = data + reg/1.2
 plt.plot(time, data[:, 0])
-plt.show()
-
-
-reg = optimize_signal_model(data=data, run_indicator=run_indicator, onsets=onsets,
-					  trial_types=trial_types, TR=TR)
-
-time = np.arange(data.shape[0]) * TR
-
-plt.plot(time, reg)
+plt.plot(time, reg/1.2)
 plt.show()
