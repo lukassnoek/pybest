@@ -197,6 +197,8 @@ def save_preproc_data(sub, ses, task, func_data, conf_data, event_data, mask, ru
     f_base = f'sub-{sub}_ses-{ses}_task-{task}'
     f_out = op.join(out_dir, f_base + '_desc-preproc_bold.npy')
     np.save(f_out, func_data)
+    func_data_img = masking.unmask(func_data, mask)
+    func_data_img.to_filename(f_out.replace('npy', 'nii.gz'))
 
     np.save(op.join(out_dir, 'run_idx.npy'), run_idx)
 
