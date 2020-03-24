@@ -135,10 +135,6 @@ def get_best_HRF(func_data, run_idx, onsets, trial_types, TR, stim_durs=None, mo
 	# how many HRFs do we ahve
 	n_HRFs = HTF_TS.shape[1]
 
-	# make instance of standard scaler and our ridge
-	scaler = StandardScaler()
-	model = RidgeCV()
-
 	n_run = np.unique(run_idx).size
 
 	# Go to default settings with 1 second durations
@@ -172,20 +168,31 @@ def get_best_HRF(func_data, run_idx, onsets, trial_types, TR, stim_durs=None, mo
 		# get regressor matrix for this HRF kernel
 		X = get_regressor_matrix(HRF_kernel, frame_times, trial_types, onsets,
 								stim_durs, modulations, oversampling=oversampling, min_onset=0)
-		
+
+		# fit data
+		betas = np.linalg.inv(X.T @ X) @ X.T @ func_data
+		y_pred = X @ betas
+		r2s_hrf[i, :] = r2_score(func_data, y_pred, multioutput='raw_values')
+
+
 		# loop over runs, fit each run by itself to save memory
-		r2_scores = np.zeros(func_data.shape[1])
-		for run in np.unique(run_idx):
-			run_mask = run_idx == run
-			y = func_data[run_mask, :]
+		# r2_scores = np.zeros(func_data.shape[1])
+		# for run in np.unique(run_idx):
+		# 	run_mask = run_idx == run
+		# 	y = func_data[run_mask, :]
+		# 	run_X = X[run_mask, :]
+		# 	# our design matrix have alot columns that might not
+		# 	# be occuring during this run - lets remove them
+		# 	run_X = run_X[:, ~np.all(run_X == 0, axis=0)]
 
-			betas = np.linalg.inv(X.T @ X) @ X.T @ y
+		# 	# fit data
+		# 	betas = np.linalg.inv(run_X.T @ run_X) @ run_X.T @ y
 
-			# Overfitting to check
-			y_pred = betas @ run_data
-			r2_scores += r2_score(y, y_pred, multioutput='raw_values')
+		# 	# Overfitting to check
+		# 	y_pred = run_X @ betas
+		# 	r2_scores += r2_score(y, y_pred, multioutput='raw_values')
 
-		r2s_hrf[i, :] = r2_scores / n_run
+		# r2s_hrf[i, :] = r2_scores / n_run
 	
 	# pick best HRF for each voxel
 	best_HRF = r2s_hrf.argmax(0)
@@ -222,7 +229,7 @@ def optimize_signal_model(func_data, run_idx, onsets, trial_types, TR, stim_durs
 		modulations = np.ones(len(onsets))
 
 	scaler = StandardScaler()
-	model = RidgeCV()
+	model = Ridge()
 
 	# get indices of the best HRF per voxel
 	best_HRF = get_best_HRF(func_data, run_idx, onsets,
@@ -274,13 +281,13 @@ if __name__ == "__main__":
 
 	# create data
 	n_vox = 400
-	func_data = np.random.random((900, n_vox))/10
+	func_data = np.random.random((900, n_vox))*2
 	# demean data
 	func_data -= func_data.mean(0)
 	# create run indicator, just one run for now
-	run_idx = np.repeat([0, 1, 3], 300)
+	run_idx = np.repeat([0, 1, 2], 300)
 	# define a few onsets
-	onsets = np.array([4, 44, 100, 122, 166, 188, 242, 402])
+	onsets = np.array([4, 30, 240, 340, 410, 440, 550, 620, 700, 750, 810])
 	# its a single trial, so each onset is a new trial type
 	trial_types = np.arange(len(onsets))
 	# sluggish TR, just what we need
@@ -309,10 +316,11 @@ if __name__ == "__main__":
 			oversampling=10 * TR,
 			min_onset=0)
 
-		func_data[:, vox] += reg.flatten()/1.2
+		func_data[:, vox] += reg.flatten()
 
 	best_HRF = get_best_HRF(func_data, run_idx, onsets, trial_types,
 							TR, stim_durs=stim_durs, modulations=modulations)
+	print("We guessed", np.mean(best_HRF==hrfs)*100, "% correct")
 	assert np.all(best_HRF==hrfs), "The chosen HRFs for the voxels isn't correct"
 
 	# This is what the function call looks like
