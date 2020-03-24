@@ -12,7 +12,7 @@ from .utils import _load_gifti, tqdm_out
 
 
 def preprocess_funcs(funcs, mask, space, high_pass_type, high_pass,
-                    savgol_order, gm_thresh, tr, logger):
+                     savgol_order, gm_thresh, tr, logger):
     """ Preprocesses a set of functional files (either volumetric nifti or
     surface gifti); high-pass filter (DCT) and normalization only.
 
@@ -190,7 +190,7 @@ def hp_filter(data, tr, n_vol, high_pass_type, high_pass, savgol_order):
 
 def save_preproc_data(sub, ses, task, func_data, conf_data, event_data, mask, run_idx, work_dir):
 
-    out_dir = op.join(work_dir, f'sub-{sub}', f'ses-{ses}')
+    out_dir = op.join(work_dir, f'sub-{sub}', f'ses-{ses}', 'preproc')
     if not op.isdir(out_dir):
         os.makedirs(out_dir)
 
@@ -215,7 +215,7 @@ def save_preproc_data(sub, ses, task, func_data, conf_data, event_data, mask, ru
 
 def load_preproc_data(sub, ses, task, work_dir):
     
-    in_dir = op.join(work_dir, f'sub-{sub}', f'ses-{ses}')
+    in_dir = op.join(work_dir, f'sub-{sub}', f'ses-{ses}', 'preproc')
     f_base = f'sub-{sub}_ses-{ses}_task-{task}_desc-preproc_'
     
     f_in = op.join(in_dir, f_base)

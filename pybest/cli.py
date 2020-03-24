@@ -8,7 +8,7 @@ from .utils import logger, check_parameters, set_defaults
 from .utils import find_exp_parameters, find_data
 from .preproc import preprocess_funcs, preprocess_confs, preprocess_events
 from .preproc import load_preproc_data, save_preproc_data
-from .noise_model import run_noise_processing
+from .noise_model import run_noise_processing, save_denoised_data, load_denoised_data
 
 @click.command()
 @click.argument('bids_dir')
@@ -18,6 +18,7 @@ from .noise_model import run_noise_processing
 @click.argument('subject', nargs=-1, required=False)
 @click.option('--work-dir', default=None, required=False)
 @click.option('--start-from', type=click.Choice(['preproc', 'noiseproc', 'signalproc']), default='preproc', required=False)
+@click.option('--denoising-strategy', type=click.Choice(['dummy']), default='dummy', required=False)
 @click.option('--session', default=None, required=False)
 @click.option('--task', default=None)
 @click.option('--space', default='T1w', show_default=True)
@@ -28,7 +29,7 @@ from .noise_model import run_noise_processing
 @click.option('--hemi', type=click.Choice(['L', 'R']), default='L', show_default=True)
 @click.option('--tr', default=None, type=click.FLOAT, show_default=True)
 @click.option('--nthreads', default=1, show_default=True)
-def main(bids_dir, out_dir, fprep_dir, ricor_dir, subject, work_dir, start_from,
+def main(bids_dir, out_dir, fprep_dir, ricor_dir, subject, work_dir, start_from, denoising_strategy,
          session, task, space, gm_thresh, high_pass_type, high_pass, savgol_order, hemi, tr, nthreads):
     """ Main API of pybest. """
 
@@ -82,19 +83,34 @@ def main(bids_dir, out_dir, fprep_dir, ricor_dir, subject, work_dir, start_from,
                     event_data = preprocess_events(events, logger)
                     
                     logger.info("Saving preprocessed data")
-                    save_preproc_data(sub, ses, task, func_data, conf_data, event_data, mask, run_idx, work_dir)
+                    save_preproc_data(
+                        sub, ses, task, func_data, conf_data,
+                        event_data, mask, run_idx, work_dir
+                    )
                 
                 # If we did preprocessing already ...
                 if start_from == 'noiseproc':
-                    func_data, conf_data, event_data, mask, run_idx = load_preproc_data(sub, ses, task, work_dir)
+                    func_data, conf_data, event_data, mask, run_idx = load_preproc_data(
+                        sub, ses, task, work_dir
+                    )
                 
                 # ... and didn't do noiseprocessing yet ...
                 if not start_from == 'signalproc':
-                    func_data = run_noise_processing(func_data, conf_data, run_idx, mask, work_dir)
+                    func_data = run_noise_processing(
+                        func_data,
+                        conf_data,
+                        run_idx,
+                        denoising_strategy,
+                        logger
+                    )
+                    logger.info("Saving denoised data")
+                    save_denoised_data(sub, ses, task, func_data, mask, work_dir)
                 else:
                     # If we did, load the denoised data
-                    #func_data, event_data = load_denoised_data(sub, ses, task, workdir)
-                    pass
+                    logger.info("Loading denoised data")
+                    func_data, event_data, mask, run_idx = load_denoised_data(
+                        sub, ses, task, work_dir
+                    )
 
 
 if __name__ == '__main__':
