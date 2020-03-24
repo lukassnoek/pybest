@@ -166,29 +166,24 @@ def get_best_HRF(func_data, run_idx, onsets, trial_types, TR, stim_durs=None, mo
 	r2s_hrf = np.zeros((n_HRFs, n_voxels))
 
 	# loop over HRFs
-	for i in range(n_HRFs):
+	for i in tqdm(range(n_HRFs), desc=f'Calculating R2 for HRF:'):
 		HRF_kernel = HTF_TS[: ,i]
 
 		# get regressor matrix for this HRF kernel
 		X = get_regressor_matrix(HRF_kernel, frame_times, trial_types, onsets,
 								stim_durs, modulations, oversampling=oversampling, min_onset=0)
-
-		# split data based on run_idx (leave one out)
-		cv = GroupKFold(n_splits=n_run).split(X, func_data[:, 0], groups=run_idx)
 		
-		# loop over test and training sets
+		# loop over runs, fit each run by itself to save memory
 		r2_scores = np.zeros(func_data.shape[1])
-		for train_idx, test_idx in tqdm(cv, desc=f'Calculating R2 for HRF {i}'): # TODO: file=tqdmout
-			y_train = scaler.fit_transform(func_data[train_idx, :])
-			y_test = scaler.fit_transform(func_data[test_idx, :])
+		for run in np.unique(run_idx):
+			run_mask = run_idx == run
+			y = func_data[run_mask, :]
 
-			X_train = scaler.fit_transform(X[train_idx, :])
-			X_test = scaler.fit_transform(X[test_idx, :])
+			betas = np.linalg.inv(X.T @ X) @ X.T @ y
 
-			model.fit(X_train, y_train)
 			# Overfitting to check
-			y_pred = model.predict(X_train)
-			r2_scores += r2_score(y_train, y_pred, multioutput='raw_values')
+			y_pred = betas @ run_data
+			r2_scores += r2_score(y, y_pred, multioutput='raw_values')
 
 		r2s_hrf[i, :] = r2_scores / n_run
 	
@@ -216,6 +211,8 @@ def optimize_signal_model(func_data, run_idx, onsets, trial_types, TR, stim_durs
 		fitted_brain {array} -- The data fit using preferred HRFs for each voxel, of size func_data.shape
 		r2 {array} -- The R-square for each voxel
 	"""
+	ಠ_ಠ = ValueError('You need at least 2 runs')
+	assert np.unique(run_idx).size > 1, ಠ_ಠ
 
 	# Go to default settings with 1 second durations
 	# and 1s as scaling factors for all events
