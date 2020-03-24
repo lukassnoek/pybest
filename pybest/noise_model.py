@@ -83,7 +83,7 @@ def load_denoised_data(sub, ses, task, work_dir):
     denoised_dir = op.join(work_dir, f'sub-{sub}', f'ses-{ses}', 'denoised')
 
     func_data = np.load(op.join(denoised_dir, f'sub-{sub}_ses-{ses}_task-{task}_desc-denoised_bold.npy'))
-    event_data = pd.read_csv(op.join(preproc_dir, f'sub-{sub}_ses-{ses}_task-{task}_desc-preproc_events.tsv'))
+    event_data = pd.read_csv(op.join(preproc_dir, f'sub-{sub}_ses-{ses}_task-{task}_desc-preproc_events.tsv'), sep='\t')
     mask = nib.load(op.join(preproc_dir, f'sub-{sub}_ses-{ses}_task-{task}_desc-preproc_mask.nii.gz'))
     run_idx = np.load(op.join(preproc_dir, 'run_idx.npy'))
 
