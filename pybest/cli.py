@@ -112,6 +112,12 @@ def main(bids_dir, out_dir, fprep_dir, ricor_dir, subject, work_dir, start_from,
                         sub, ses, task, work_dir
                     )
 
+                # DANIEL, YOU START HERE. YOU MAY ASSUME YOU HAVE THE FOLLOWING VARIABLES:
+                # - func_data: 2D array (time x voxels)
+                # - event_data: dataframe (time x pca-decomposed confounds)
+                # - run_idx: 1D array (time)
+                # - bookkeeping stuff, e.g., sub (01), ses (1), task (face), work_dir, etc
+
 
 if __name__ == '__main__':
 
