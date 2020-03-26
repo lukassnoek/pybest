@@ -11,6 +11,7 @@ from sklearn.model_selection import GroupKFold
 from pybest.utils import _load_gifti, tqdm_out
 import pybest.noise_model as NM
 from nilearn import masking
+from sklearn.base import RegressorMixin, BaseEstimator
 import os
 
 """
@@ -24,20 +25,37 @@ This is dumb, I know
 But I tried to manufactor Kendricks HRFs but no banana,
 so lets load em
 """
-HRF_KERNELS2 = pd.read_csv('pybest/data/hrf_ts.tsv', sep='\t').values[:, 1:]
-add = 10
 
+class Ridge(RegressorMixin, BaseEstimator):
+	def __init__(self, lambd=1.0):
+		self.lambd = lambd
+	
+	def fit(self, X, y, apply_to):
+		"""
+		Just like a normal Ridge, but with the option of only applying the penalty on certain regressors,
+		that is, our noise regressors.
+		
+		Arguments:
+			X {[array]} -- Design matrix (time x predictor)
+			y {[array]} -- Data (time x voxel)
+		
+		Keyword Arguments:
+			apply_to {bool} -- [list indicating which predictors to apply ridge to] (default: {False})
+		"""
+		n_predictors = X.shape[1]
+		assert len(apply_to) == n_predictors, "apply_to needs to have a boolean value for each predictor"
+		
+		I = np.zeros((n_predictors, n_predictors))
+		I[np.eye(n_predictors, dtype=bool)] = apply_to
+		self.b_ = np.linalg.inv(X.T @ X + self.lambd * I) @ X.T @ y 
 
-# for k in range(20):
-# 	tmp = np.hstack((np.zeros(add), HRF_KERNELS[:, k]))[:-add]
-# 	HRF_KERNELS = np.c_[HRF_KERNELS, tmp]
+		return self
+	
+	def predict(X, y):
+		return X @ self.b_ 
 
-fav = HRF_KERNELS2[:, 17]
-HRF_KERNELS = np.zeros((501, 20))
-HRF_KERNELS[:, 9] = fav
-for i in range(1, 20):
-	add = 4*i
-	HRF_KERNELS[:, i] = np.hstack((np.zeros(add), fav))[:-add]
+# load Kendricks kernels 
+HRF_KERNELS = pd.read_csv('pybest/data/hrf_ts.tsv', sep='\t').values[:, 1:]
 
 def compute_regressor(exp_condition, hrf_kernel, frame_times,
 					  oversampling=10, min_onset=0):
@@ -130,50 +148,53 @@ def get_regressor_matrix(HRF, frame_times, trial_types, onsets, stim_durs, modul
 	return regressor_matrix
 
 
-def get_best_HRF(func_data, run_idx, onsets, trial_types, TR, stim_durs=None, modulations=None, mask=False, work_dir=''):
-	"""We fit each available HRF on each voxel in a cross-validated fashion. We return the HRF indices 
-	that corresponds to the best fitting HRF for each voxel
+def get_best_HRF(func_data, run_idx, PCs, PC_indicator, lambdas, events, TR, mask=False, work_dir=''):
+	"""We fit each available HRF on each voxel for each run. We then take the median R2 for each
+	HRF per voxel across runs. The best fitting HRF per voxel is returned.
 	
 	Arguments:
-		func_data {[array]} -- Functional data SAMPLES x VOXELS
+		func_data {[array]} -- Functional data TIME x VOXELS
 		run_idx {[array]} -- list of run indices
-		onsets {array-like} -- list of length of events, onset time in seconds of each event
+		PCs {array}  -- Our 20 first noise PCs of size TIME x 20
+		PC_indicator {array}  -- number of PCs to use for each voxel, size of len(voxels)
+		lambdas {array}  -- lambda to use for each voxel, size of len(voxels)
+		events {dataframe} -- Pandas DataFrame with the columns:  onset  duration  trial_type  run   full_onset
+							  onset: the onset time for each event in relation to the run start
+							  duration: duration of each event
+							  trial_type: We assume singel trial, this should be np.arange(len(df))
+							  run: a run indicator list (not used)
+							  full_onset: onset times for each even in relation to the start of the FIRST run
 		trial_types {array-like} -- list of length of events, condition identifier values for each onset
 		TR {float} -- Repetition time for functional data
-	
-	Keyword Arguments:
-		stim_durs {[type]} -- list of length of events, length of each event
-		modulations {[type]} -- list of length of events, modulation of each event
+
 	
 	Returns:
 		[array] -- the indices for the best fitting HRF for each voxel
 	"""
+
+	ಠ_ಠ = ValueError('You need at least 2 runs')
+	assert np.unique(run_idx).size > 1, ಠ_ಠ
 
 	# how many HRFs do we ahve
 	n_HRFs = HRF_KERNELS.shape[1]
 
 	n_run = np.unique(run_idx).size
 
-	# Go to default settings with 1 second durations
-	# and 1s as scaling factors for all events
-	if np.all(stim_durs == None):
-		stim_durs = np.ones(len(onsets))
-	if np.all(modulations == None):
-		modulations = np.ones(len(onsets))
-
-	# Hard code this for now
-	min_onset = 0.0
 	# our HRF kernels are sampled at 10 hz
 	oversampling = 10 * TR
 
-	# Check so we have at least 2 runs?
-	assert np.unique(run_idx).size > 1, "You need at least 2 runs"
-
-	# get specifics
+	# get size of dimensions
 	n_vols, n_voxels = func_data.shape
 
 	# timing of samples
 	frame_times = np.arange(n_vols) * TR
+
+	# extract info from events DataFrame
+	trial_type = events['trial_type'].values
+	# we don't fit runs seperately, so we need the relative start from the first run
+	onset = events['full_onset'].values
+	duration = events['duration'].values
+	modulations = np.ones(len(duration))
 
 	# pre-allocate HRF x VOXEL
 	r2s_hrf = np.zeros((n_HRFs, n_voxels))
@@ -182,34 +203,29 @@ def get_best_HRF(func_data, run_idx, onsets, trial_types, TR, stim_durs=None, mo
 	for i in tqdm(range(n_HRFs), desc=f'Calculating R2 for HRF:', file=tqdm_out):
 		HRF_kernel = HRF_KERNELS[: ,i]
 
-		# get regressor matrix for this HRF kernel
-		X = get_regressor_matrix(HRF_kernel, frame_times, trial_types, onsets,
-								stim_durs, modulations, oversampling=oversampling, min_onset=-25)
-		X = np.c_[X, np.ones(X.shape[0])]
-		# fit data
-		betas = np.linalg.inv(X.T @ X) @ X.T @ func_data
-		y_pred = X @ betas
-		r2s_hrf[i, :] = r2_score(func_data, y_pred, multioutput='raw_values')
+		# we have different number of PCs and Lambdas for each voxel,
+		# so we need to fit the voxels separately
+		vox = 0
+		for vox in range(n_voxels):
+			model = Ridge(lambd=lambdas[vox])
 
+			# get regressor matrix for this HRF kernel
+			X = get_regressor_matrix(HRF_kernel, frame_times, trial_type, onset,
+									duration, modulations, oversampling=oversampling, min_onset=-25)
+			
+			# add the PC to the design matrix
+			# add an intercept? yes for now
+			# X = np.c_[X, PCs[:, :PC_indicator[vox]], np.ones(X.shape[0])]
+			X = np.c_[X, np.ones(X.shape[0])]
+			
+			# indicate where the noise regressors (PCs) are in the design matrix
+			apply_to = np.zeros(X.shape[1], dtype=bool)
 
-		# loop over runs, fit each run by itself to save memory
-		# r2_scores = np.zeros(func_data.shape[1])
-		# for run in np.unique(run_idx):
-		# 	run_mask = run_idx == run
-		# 	y = func_data[run_mask, :]
-		# 	run_X = X[run_mask, :]
-		# 	# our design matrix have alot columns that might not
-		# 	# be occuring during this run - lets remove them
-		# 	run_X = run_X[:, ~np.all(run_X == 0, axis=0)]
-
-		# 	# fit data
-		# 	betas = np.linalg.inv(run_X.T @ run_X) @ run_X.T @ y
-
-		# 	# Overfitting to check
-		# 	y_pred = run_X @ betas
-		# 	r2_scores += r2_score(y, y_pred, multioutput='raw_values')
-
-		# r2s_hrf[i, :] = r2_scores / n_run
+			#apply_to[len(trial_type):len(trial_type)+PC_indicator[vox]] = True
+			# fit data
+			model.fit(X, func_data, apply_to)
+			y_pred = model.predict(X)
+			r2s_hrf[i, vox] = r2_score(func_data, y_pred)
 	
 	# pick best HRF for each voxel
 	best_HRF = r2s_hrf.argmax(0)
@@ -222,19 +238,20 @@ def get_best_HRF(func_data, run_idx, onsets, trial_types, TR, stim_durs=None, mo
 	return best_HRF
 
 
-def optimize_signal_model(func_data, run_idx, onsets, trial_types, TR, stim_durs=None, modulations=None):
+def optimize_signal_model(func_data, run_idx, PCs, PC_indicator, lambdas, events, TR, mask=False, work_dir=''):
 	"""Fits the data with the preferred HRF of each voxel
 	
 	Arguments:
 		func_data {[array]} -- Functional data SAMPLES x VOXELS
 		run_idx {[array]} -- list of run indices
-		onsets {array-like} -- list of length of events, onset time in seconds of each event
-		trial_types {array-like} -- list of length of events, condition identifier values for each onset
+		events {dataframe} -- Pandas DataFrame with the columns:  onset  duration  trial_type  run   full_onset
+							  onset: the onset time for each event in relation to the run start
+							  duration: duration of each event
+							  trial_type: We assume singel trial, this should be np.arange(len(df))
+							  run: a run indicator list (not used)
+							  full_onset: onset times for each even in relation to the start of the FIRST run
 		TR {float} -- Repetition time for functional data
-	
-	Keyword Arguments:
-		stim_durs {[type]} -- list of length of events, length of each event
-		modulations {[type]} -- list of length of events, modulation of each event
+
 	
 	Returns:
 		fitted_brain {array} -- The data fit using preferred HRFs for each voxel, of size func_data.shape
@@ -243,47 +260,46 @@ def optimize_signal_model(func_data, run_idx, onsets, trial_types, TR, stim_durs
 	ಠ_ಠ = ValueError('You need at least 2 runs')
 	assert np.unique(run_idx).size > 1, ಠ_ಠ
 
-	# Go to default settings with 1 second durations
-	# and 1s as scaling factors for all events
-	if np.all(stim_durs == None):
-		stim_durs = np.ones(len(onsets))
-	if np.all(modulations == None):
-		modulations = np.ones(len(onsets))
-
 	# get indices of the best HRF per voxel
-	best_HRF = get_best_HRF(func_data, run_idx, onsets,
-							trial_types, TR, stim_durs=stim_durs, modulations=modulations)
+	best_HRF = get_best_HRF(func_data, run_idx, PCs, PC_indicator,
+							lambdas, events, TR, mask=False, work_dir='')
 	
 	# get specifics
 	n_vols, n_voxels = func_data.shape
 	frame_times = np.arange(n_vols) * TR
 
-	# fit voxels with individual HRFs
-	# So I could only think of one good way of doing this
-	# - Lets fit all voxels with the same HRF together instead of one voxel alone
-	HRF_idx = np.unique(best_HRF)
-	fitted_brain = np.zeros(func_data.shape)
-	
-	# over unique HRFs
-	for HRF in HRF_idx:
-	
-		# this is the HRF we are using
-		HRF_kernel = HRF_KERNELS[:, HRF]
+	# extract info from events DataFrame
+	trial_type = events['trial_type'].values
+	# we don't fit runs seperately, so we need the relative start from the first run
+	onset = events['full_onset'].values
+	duration = events['duration'].values
+	modulations = np.ones(len(duration))
 
-		# make mask so we know which voxels have this HRF
-		mask = best_HRF == HRF
+	oversampling = 10 * TR
+
+	fitted_brain = np.zeros(func_data.shape)
+
+	# loop over
+	for vox in range(n_voxels):
+		model = Ridge(lambd=lambdas[vox])
+		HRF_kernel = best_HRF[vox]
 
 		# get regressor matrix for this HRF kernel
-		X = get_regressor_matrix(HRF_kernel, frame_times, trial_types, onsets,
-								stim_durs, modulations, oversampling=oversampling, min_onset=-25)
-		X = np.c_[X, np.ones(X.shape[0])]
-
+		X = get_regressor_matrix(HRF_kernel, frame_times, trial_type, onset,
+								duration, modulations, oversampling=oversampling, min_onset=-25)
+		
+		# add the PC to the design matrix
+		# add an intercept? yes for now
+		X = np.c_[X, PCs[PC_indicator[vox]], np.ones(X.shape[0])]
+		
+		# indicate where the noise regressors (PCs) are in the design matrix
+		apply_to = np.zeros(X.shape[1], dtype=bool)
+		apply_to[len(trial_type):trial_type+PC_indicator[vox]] = True
 		# fit data
-		betas = np.linalg.inv(X.T @ X) @ X.T @ func_data[:, mask]
-
-		fitted_brain[:, mask] = X @ betas
-
-	r2 = r2_score(func_data, fitted_brain, multioutput='raw_values')
+		model.fit(X, func_data, apply_to)
+		fitted_brain[:, vox] = model.predict(X)
+	
+	r2 = r2_score(func_data, fitted_brain)
 
 	return fitted_brain, r2
 
@@ -352,6 +368,10 @@ if __name__ == "__main__":
 	task = 'face'
 	work_dir = 'fsaverage6/work'
 	func_data, event_data, mask, run_idx = NM.load_denoised_data(sub, ses, task, work_dir)
+	# we also expect these inputs
+	PCs = np.random.random([func_data.shape[0], 20]) # 20 PCs
+	PC_indicator = np.random.choice(range(20), func_data.shape[1])
+	lambdas = np.random.random(func_data.shape[1])
 
 	TR = 0.7
 
@@ -368,17 +388,18 @@ if __name__ == "__main__":
 		max_prev = max(full_onset)
 		full_onset = np.hstack((full_onset, event[event.run==r]['onset'].values+max_prev))
 	
-	event['onset'] = full_onset
+	event['full_onset'] = full_onset
 	event['trial_type'] = np.arange(len(event)) # single trial
-
 
 	"""
 	Lets fit as we usually do
 	"""
+	event_data['onset'] = full_onset
+	event_data['trial_type'] = np.arange(len(event)) # single trial
 	import warnings
 	warnings.simplefilter("ignore")
 	X = make_design_matrix(
-			frame_times, event, hrf_model='glover', drift_order=2, drift_model=None)
+			frame_times, event_data, hrf_model='glover', drift_order=2, drift_model=None)
 
 	X = X.values
 	betas = np.linalg.inv(X.T @ X) @ X.T @ func_data
@@ -395,7 +416,7 @@ if __name__ == "__main__":
 	stim_durs = event['duration'].values
 
 	# best HRF
-	best_HRF = get_best_HRF(func_data, run_idx, onsets, trial_types, TR)
+	best_HRF = get_best_HRF(func_data, run_idx, PCs, PC_indicator, lambdas, event, TR, mask=False, work_dir='')
 	a = [sum(x==best_HRF) for x in range(40)]
 	print(a)
 	plt.plot(a)
