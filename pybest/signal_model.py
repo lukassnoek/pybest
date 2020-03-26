@@ -26,6 +26,8 @@ so lets load em
 """
 HRF_KERNELS2 = pd.read_csv('pybest/data/hrf_ts.tsv', sep='\t').values[:, 1:]
 add = 10
+
+
 # for k in range(20):
 # 	tmp = np.hstack((np.zeros(add), HRF_KERNELS[:, k]))[:-add]
 # 	HRF_KERNELS = np.c_[HRF_KERNELS, tmp]
