@@ -7,8 +7,8 @@ from tqdm import tqdm
 from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import Ridge, RidgeCV
 from sklearn.pipeline import make_pipeline
-from sklearn.model_selection import GroupKFold
-from sklearn.metrics import r2_score
+from sklearn.model_selection import KFold, cross_val_predict, cross_val_score
+from sklearn.metrics import r2_score, make_scorer
 from nilearn import masking
 from .utils import tqdm_out
 
@@ -30,11 +30,39 @@ def run_noise_processing(ddict, cfg, logger):
     strategy = cfg['denoising_strategy']
     logger.info(f"Starting denoising using strategy '{strategy}'")
 
-    if strategy == 'dummy':
-        ddict['dns_func'] = ddict['preproc_func']
-        return ddict
+    #if strategy == 'dummy':
+    #    ddict['dns_func'] = ddict['preproc_func']
+    #    return ddict
+    cv = KFold(n_splits=5)
+    for run in np.unique(ddict['run_idx']).astype(int):
+        idx = ddict['run_idx'] == run
+        func = ddict['preproc_func'][idx, :]
+        conf = ddict['preproc_conf'].loc[idx, :].to_numpy()
+        
+        # Try out comp 1-20
+        n_comps = np.arange(0, 100, 2)
+        r2s = np.zeros((n_comps.size, func.shape[1]))
+        for i, n_comp in enumerate(tqdm(n_comps, desc=f'run {run+1}')):
+            X = conf[:, :(n_comp+1)]
+            preds = cross_val_predict(RidgeCV(), X, func, cv=cv)
+            r2s[i, :] = r2_score(func, preds, multioutput='raw_values')
 
-    """ OLD STUFF
+        opt_comp = r2s.argmax(axis=0)
+        opt_r2 = r2s.max(axis=0)
+        bad_vox = np.logical_and(opt_comp == 0, opt_r2 < 0)
+        opt_comp[bad_vox] = 0
+        
+        clean_func = np.zeros_like(func)
+        for comp in np.unique(opt_comp):
+            vox_idx = opt_comp == comp
+            # TO DO: REFIT MODEL WITH APPROPRIATE LAMBDA,
+            # REGRESS OUT STUFF
+            func[:, vox_idx] = ...
+       
+        #masking.unmask(r2s, ddict['mask']).to_filename(f'r2_run{run}.nii.gz')
+
+            
+    """
     scaler = StandardScaler()
     model = RidgeCV()
 
