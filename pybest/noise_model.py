@@ -13,7 +13,7 @@ from nilearn import masking
 from .utils import tqdm_out
 
 
-def run_noise_processing(func_data, conf_data, run_idx, denoising_strategy, logger):
+def run_noise_processing(ddict, cfg, logger):
     """ Runs noise processing.
 
     Parameters
@@ -27,11 +27,12 @@ def run_noise_processing(func_data, conf_data, run_idx, denoising_strategy, logg
     denoising_strategy : str
         Method for denoising (for now: only dummy; does nothing)
     """
+    strategy = cfg['denoising_strategy']
+    logger.info(f"Starting denoising using strategy '{strategy}'")
 
-    logger.info(f"Starting denoising using strategy '{denoising_strategy}'")
-
-    if denoising_strategy == 'dummy':
-        return func_data
+    if strategy == 'dummy':
+        ddict['dns_func'] = ddict['preproc_func']
+        return ddict
 
     """ OLD STUFF
     scaler = StandardScaler()
@@ -63,30 +64,30 @@ def run_noise_processing(func_data, conf_data, run_idx, denoising_strategy, logg
     """
 
 
-def save_denoised_data(sub, ses, task, func_data, mask, work_dir):
+def save_denoised_data(sub, ses, task, ddict, cfg):
     
-    out_dir = op.join(work_dir, f'sub-{sub}', f'ses-{ses}', 'denoised')
+    out_dir = op.join(cfg['work_dir'], f'sub-{sub}', f'ses-{ses}', 'denoised')
     if not op.isdir(out_dir):
         os.makedirs(out_dir)
 
     f_base = f'sub-{sub}_ses-{ses}_task-{task}'
     f_out = op.join(out_dir, f_base + '_desc-denoised_bold.npy')
-    np.save(f_out, func_data)
+    np.save(f_out, ddict['dns_func'])
 
-    func_data_img = masking.unmask(func_data, mask)
+    func_data_img = masking.unmask(ddict['dns_func'], ddict['mask'])
     func_data_img.to_filename(f_out.replace('npy', 'nii.gz'))
 
 
-def load_denoised_data(sub, ses, task, work_dir):
+def load_denoised_data(sub, ses, task, ddict, cfg):
     
-    preproc_dir = op.join(work_dir, f'sub-{sub}', f'ses-{ses}', 'preproc')
-    denoised_dir = op.join(work_dir, f'sub-{sub}', f'ses-{ses}', 'denoised')
+    preproc_dir = op.join(cfg['work_dir'], f'sub-{sub}', f'ses-{ses}', 'preproc')
+    denoised_dir = op.join(cfg['work_dir'], f'sub-{sub}', f'ses-{ses}', 'denoised')
 
-    func_data = np.load(op.join(denoised_dir, f'sub-{sub}_ses-{ses}_task-{task}_desc-denoised_bold.npy'))
-    event_data = pd.read_csv(op.join(preproc_dir, f'sub-{sub}_ses-{ses}_task-{task}_desc-preproc_events.tsv'))
-    mask = nib.load(op.join(preproc_dir, f'sub-{sub}_ses-{ses}_task-{task}_desc-preproc_mask.nii.gz'))
-    run_idx = np.load(op.join(preproc_dir, 'run_idx.npy'))
+    ddict['dns_func'] = np.load(op.join(denoised_dir, f'sub-{sub}_ses-{ses}_task-{task}_desc-denoised_bold.npy'))
+    ddict['preproc_events'] = pd.read_csv(op.join(preproc_dir, f'sub-{sub}_ses-{ses}_task-{task}_desc-preproc_events.tsv'), sep='\t')
+    ddict['mask'] = nib.load(op.join(preproc_dir, f'sub-{sub}_ses-{ses}_task-{task}_desc-preproc_mask.nii.gz'))
+    ddict['run_idx'] = np.load(op.join(preproc_dir, 'run_idx.npy'))
 
-    return func_data, event_data, mask, run_idx
+    return ddict
 
     

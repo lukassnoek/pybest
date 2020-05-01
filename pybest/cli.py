@@ -33,84 +33,51 @@ def main(bids_dir, out_dir, fprep_dir, ricor_dir, subject, work_dir, start_from,
          session, task, space, gm_thresh, high_pass_type, high_pass, savgol_order, hemi, tr, nthreads):
     """ Main API of pybest. """
 
-    ##### set defaults #####
-    bids_dir, out_dir, fprep_dir, ricor_dir, work_dir, subject = set_defaults(
-        bids_dir, out_dir, fprep_dir, ricor_dir, work_dir, subject, logger
-    )
-
-    check_parameters(space, tr)
+    ##### set + check parameters #####
+    cfg = locals()
+    cfg = set_defaults(cfg, logger)
+    check_parameters(cfg, logger)
 
     ##### find data #####
-    subject, session, task = find_exp_parameters(bids_dir, fprep_dir, subject, session, task)
+    cfg = find_exp_parameters(cfg)
 
     ##### <start processing loop> #####
-    for i, sub in enumerate(subject):
-        for ii, ses in enumerate(session[i]):
-            for iii, task in enumerate(task[i][ii]):
+    for i, sub in enumerate(cfg['subject']):
+        for ii, ses in enumerate(cfg['session'][i]):
+            for task in cfg['task'][i][ii]:
                 logger.info(f"Starting process for sub-{sub}, ses-{ses}, task-{task}")
 
-                funcs, confs, events, ricors, gm_prob = find_data(
-                    sub, ses, task, space,  hemi, bids_dir, fprep_dir, ricor_dir
-                )
-
+                # ddict = data dictionary
+                ddict = find_data(sub, ses, task, cfg, logger)
+                
                 if tr is None:
-                    tr = np.round(nib.load(funcs[0]).header['pixdim'][4], 3)
+                    tr = np.round(nib.load(ddict['funcs'][0]).header['pixdim'][4], 3)
                     logger.info(f"TR is not set; extracted TR from first func is {tr}")
 
+                # Store TR in data dict
+                ddict['tr'] = tr
+
                 if start_from == 'preproc':
-                    func_data, run_idx, mask = preprocess_funcs(
-                        funcs,
-                        gm_prob,
-                        space,
-                        high_pass_type,
-                        high_pass,
-                        savgol_order,
-                        gm_thresh,
-                        tr,
-                        logger
-                    )
-                    
-                    conf_data = preprocess_confs(
-                        confs,
-                        ricors,
-                        high_pass_type,
-                        high_pass,
-                        savgol_order,
-                        tr,
-                        logger
-                    )
-                    
-                    event_data = preprocess_events(events, logger)
+                    ddict = preprocess_funcs(ddict, cfg, logger)
+                    ddict = preprocess_confs(ddict, cfg, logger)                    
+                    ddict = preprocess_events(ddict, cfg, logger)
                     
                     logger.info("Saving preprocessed data")
-                    save_preproc_data(
-                        sub, ses, task, func_data, conf_data,
-                        event_data, mask, run_idx, work_dir
-                    )
+                    save_preproc_data(sub, ses, task, ddict, cfg)
                 
                 # If we did preprocessing already ...
                 if start_from == 'noiseproc':
-                    func_data, conf_data, event_data, mask, run_idx = load_preproc_data(
-                        sub, ses, task, work_dir
-                    )
+                    ddict = load_preproc_data(sub, ses, task, ddict, cfg)
                 
                 # ... and didn't do noiseprocessing yet ...
                 if not start_from == 'signalproc':
-                    func_data = run_noise_processing(
-                        func_data,
-                        conf_data,
-                        run_idx,
-                        denoising_strategy,
-                        logger
-                    )
+                    ddict = run_noise_processing(ddict, cfg, logger)
                     logger.info("Saving denoised data")
-                    save_denoised_data(sub, ses, task, func_data, mask, work_dir)
+                    save_denoised_data(sub, ses, task, ddict, cfg)
                 else:
                     # If we did, load the denoised data
                     logger.info("Loading denoised data")
-                    func_data, event_data, mask, run_idx = load_denoised_data(
-                        sub, ses, task, work_dir
-                    )
+                    ddict = load_denoised_data(sub, ses, task, ddict, cfg)
 
                 # DANIEL, YOU START HERE. YOU MAY ASSUME YOU HAVE THE FOLLOWING VARIABLES:
                 # - func_data: 2D array (time x voxels)
