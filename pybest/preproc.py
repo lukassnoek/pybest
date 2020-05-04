@@ -13,36 +13,7 @@ from .utils import _load_gifti
 
 def preprocess_funcs(ddict, cfg, logger):
     """ Preprocesses a set of functional files (either volumetric nifti or
-    surface gifti); high-pass filter (DCT) and normalization only.
-
-    Parameters
-    ----------
-    funcs : list
-        List of paths to functional files
-    mask : str
-        Path to mask (for now: assume it's a GM probseg file)
-    space : str
-        Name of space ('T1w', 'fsaverage{5,6}', 'MNI152NLin2009cAsym')
-    logger : logging object
-        Main logger (from cli.py)
-    high_pass_type : str
-        Either 'dct' or 'savgol'
-    high_pass : float
-        High-pass cutoff (in Hz)
-    savgol_order : int
-        Savitsky-Golay polyorder (default: 4)
-    gm_thresh : float
-        Gray matter probability threshold (higher = included in binary mask)
-    tr : float
-        TR of scan (only relevant if space is fsaverage) in seconds
-
-    Returns
-    -------
-    data_ : np.ndarray
-        2D array (time x voxels) with run-wise concatenated data
-    run_idx_ : np.ndarray
-        1D array with run indices, [0, 0, 0, ... , 1, 1, 1, ... , R, R, R]
-        for R runs
+    surface gifti); masking, high-pass filter (DCT) and normalization only.
     """
 
     if 'fs' not in cfg['space']:  # no need for mask in surface files
@@ -85,7 +56,7 @@ def preprocess_funcs(ddict, cfg, logger):
         # Add to run index
         run_idx_.append(np.ones(data.shape[0]) * i)
 
-    # Concatenate data in time dimension (or should we keep it in lists?)
+    # Concatenate data in time dimension
     data_ = np.vstack(data_)
     run_idx_ = np.concatenate(run_idx_)
 
@@ -93,6 +64,8 @@ def preprocess_funcs(ddict, cfg, logger):
         f"HP-filtered/normalized func data has {data_.shape[0]} timepoints "
         f"(across {i+1} runs) and {data_.shape[1]} voxels"
     )
+
+    # Store in data-dictionary (ddict)
     ddict['preproc_func'] = data_
     ddict['run_idx'] = run_idx_
     return ddict
@@ -104,13 +77,6 @@ def preprocess_confs(ddict, cfg, logger):
     2. Set NaNs to 0
     3. High-pass the data (same as functional data)
     4. PCA
-
-    Parameters
-    ----------
-
-    Returns
-    -------
-
     """
     
     logger.info("Starting preprocessing of confounds")
@@ -134,8 +100,7 @@ def preprocess_confs(ddict, cfg, logger):
         # High-pass confounds
         data = hp_filter(data.to_numpy(), ddict, cfg, logger)
         
-        # Perform PCA and store in dataframe
-        # Only store 100 components (might change)
+        # Perform PCA
         data = pca.fit_transform(data)
         if data.shape[1] > cfg['ncomps']:
             cfg['ncomps'] = data.shape[1]
@@ -150,12 +115,13 @@ def preprocess_confs(ddict, cfg, logger):
         n_comp_for_90r2 = np.argmax(np.cumsum(pca.explained_variance_ratio_) >= 0.9)
         logger.info(f"PCA needed {n_comp_for_90r2} comps to explain 90% of the variance for run {i+1}")
 
+        # Make proper dataframe
         cols = [f'pca_{str(c+1).zfill(3)}' for c in range(data.shape[1])]
         data = pd.DataFrame(data, columns=cols)
         data_.append(data)
 
-    # data_ is a 
-    data_ = pd.concat(data_, axis=0)#, join='inner', ignore_index=True)
+    # Concatenate DataFrames
+    data_ = pd.concat(data_, axis=0)
     logger.info(
         f"HP-filtered/normalized confound data has {data_.shape[0]} timepoints "
         f"(across {i+1} runs) and {data_.shape[1]} components."
@@ -188,6 +154,7 @@ def preprocess_events(ddict, cfg, logger):
 
 
 def hp_filter(data, ddict, cfg, logger):
+    """ High-pass filter (DCT or Savitsky-Golay). """
     n_vol = data.shape[0]
     tr = ddict['tr']
     frame_times = np.linspace(0.5 * tr, n_vol * (tr + 0.5), n_vol, endpoint=False)
@@ -205,8 +172,9 @@ def hp_filter(data, ddict, cfg, logger):
     return data
 
 
-def save_preproc_data(sub, ses, task, ddict, cfg):
+def save_preproc_data(ddict, cfg):
     # Maybe just move this inside the preprocessing functions?
+    sub, ses, task = cfg['sub'], cfg['ses'], cfg['task']
     out_dir = op.join(cfg['work_dir'], f'sub-{sub}', f'ses-{ses}', 'preproc')
     if not op.isdir(out_dir):
         os.makedirs(out_dir)
@@ -232,8 +200,8 @@ def save_preproc_data(sub, ses, task, ddict, cfg):
     ddict['preproc_events'].to_csv(f_out, sep='\t', index=False)
 
 
-def load_preproc_data(sub, ses, task, ddict, cfg):
-    
+def load_preproc_data(ddict, cfg):
+    sub, ses, task = cfg['sub'], cfg['ses'], cfg['task']
     in_dir = op.join(cfg['work_dir'], f'sub-{sub}', f'ses-{ses}', 'preproc')
     f_base = f'sub-{sub}_ses-{ses}_task-{task}_desc-preproc_'
     

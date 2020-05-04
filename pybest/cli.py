@@ -8,7 +8,7 @@ from .utils import logger, check_parameters, set_defaults
 from .utils import find_exp_parameters, find_data
 from .preproc import preprocess_funcs, preprocess_confs, preprocess_events
 from .preproc import load_preproc_data, save_preproc_data
-from .noise_model import run_noise_processing, save_denoised_data, load_denoised_data
+from .noise_model import run_noise_processing, load_denoised_data
 
 @click.command()
 @click.argument('bids_dir')
@@ -27,9 +27,11 @@ from .noise_model import run_noise_processing, save_denoised_data, load_denoised
 @click.option('--hemi', type=click.Choice(['L', 'R']), default='L', show_default=True)
 @click.option('--tr', default=None, type=click.FLOAT, show_default=True)
 @click.option('--ncomps', default=100, type=click.INT, show_default=True)
+@click.option('--cv-repeats', default=2, type=click.INT, show_default=True)
+@click.option('--cv-splits', default=5, type=click.INT, show_default=True)
 @click.option('--nthreads', default=1, show_default=True)
 def main(bids_dir, out_dir, fprep_dir, ricor_dir, subject, work_dir, start_from, session, task, space,
-         gm_thresh, high_pass_type, high_pass, hemi, tr, ncomps, nthreads):
+         gm_thresh, high_pass_type, high_pass, hemi, tr, ncomps, cv_repeats, cv_splits, nthreads):
     """ Main API of pybest. """
 
     ##### set + check parameters #####
@@ -73,8 +75,6 @@ def main(bids_dir, out_dir, fprep_dir, ricor_dir, subject, work_dir, start_from,
                 # ... and didn't do noiseprocessing yet ...
                 if not start_from == 'signalproc':
                     ddict = run_noise_processing(ddict, cfg, logger)
-                    logger.info("Saving denoised data")
-                    save_denoised_data(sub, ses, task, ddict, cfg)
                 else:
                     # If we did, load the denoised data
                     logger.info("Loading denoised data")
