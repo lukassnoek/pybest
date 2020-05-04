@@ -105,7 +105,6 @@ def run_noise_processing(ddict, cfg, logger):
             for alpha in np.unique(opt_alpha):
                 alpha_idx = opt_alpha == alpha
                 vox_idx = np.logical_and(comp_idx, alpha_idx)
-                print(vox_idx.sum())
                 to_denoise = func[:, vox_idx]
                 X = conf[:, :n_comp]  # not plus 1, we did this earlier
                 
@@ -149,8 +148,8 @@ def run_noise_processing(ddict, cfg, logger):
     img.to_filename(op.join(out_dir, f_out))
 
     # Bit hacky (but good for RAM)
-    ddict['alpha_data'] = image.concat_imgs(sorted(glob(out_dir, '*desc-opt_alpha.nii.gz')))
-    ddict['ncomps_data'] = image.concat_imgs(sorted(glob(out_dir, '*desc-opt_ncomps.nii.gz')))
+    ddict['alpha_data'] = image.concat_imgs(sorted(glob(op.join(out_dir, '*desc-opt_alpha.nii.gz'))))
+    ddict['ncomps_data'] = image.concat_imgs(sorted(glob(op.join(out_dir, '*desc-opt_ncomps.nii.gz'))))
     return ddict
 
 

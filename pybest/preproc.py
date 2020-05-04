@@ -102,7 +102,7 @@ def preprocess_confs(ddict, cfg, logger):
         
         # Perform PCA
         data = pca.fit_transform(data)
-        if data.shape[1] > cfg['ncomps']:
+        if data.shape[1] < cfg['ncomps']:
             cfg['ncomps'] = data.shape[1]
             logger.warning(
                 f"Setting ncomps to {cfg['ncomps']}, because the PCA "
