@@ -19,28 +19,6 @@ logging.basicConfig(
 logger = logging.getLogger('pybest')
 
 
-class TqdmToLogger(io.StringIO):
-    """ Output stream for TQDM which will output to logger module instead of
-    the StdOut.
-    """
-    logger = None
-    level = None
-    buf = ''
-    
-    def __init__(self,logger,level=None):
-        super(TqdmToLogger, self).__init__()
-        self.logger = logger
-        self.level = level or logging.INFO
-    
-    def write(self,buf):
-        self.buf = buf.strip('\r\n\t ')
-    
-    def flush(self):
-        self.logger.log(self.level, self.buf)
-
-tqdm_out = TqdmToLogger(logger, level=logging.INFO)
-
-
 def check_parameters(space, tr):
 
     if 'fs' in space and tr is None:
@@ -151,10 +129,10 @@ def find_exp_parameters(cfg):
     return cfg
 
 
-def find_data(sub, ses, task, cfg, logger):
+def find_data(cfg, logger):
     """ Finds all data for a given subject/session/task/space/hemi. """
     # Set right "identifier" depending on fsaverage* or volumetric space
-    hemi, space = cfg['hemi'], cfg['space']
+    sub, ses, task, hemi, space = cfg['sub'], cfg['ses'], cfg['task'], cfg['hemi'], cfg['space']
     space_idf = f'hemi-{hemi}.func.gii' if 'fs' in space else 'desc-preproc_bold.nii.gz'
 
     # Gather funcs, confs, tasks

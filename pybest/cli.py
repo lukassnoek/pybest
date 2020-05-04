@@ -18,19 +18,18 @@ from .noise_model import run_noise_processing, save_denoised_data, load_denoised
 @click.argument('subject', nargs=-1, required=False)
 @click.option('--work-dir', default=None, required=False)
 @click.option('--start-from', type=click.Choice(['preproc', 'noiseproc', 'signalproc']), default='preproc', required=False)
-@click.option('--denoising-strategy', type=click.Choice(['dummy']), default='dummy', required=False)
 @click.option('--session', default=None, required=False)
 @click.option('--task', default=None)
 @click.option('--space', default='T1w', show_default=True)
 @click.option('--gm-thresh', default=0.9, show_default=True)
 @click.option('--high-pass-type', type=click.Choice(['dct', 'savgol']), default='dct', show_default=True)
-@click.option('--high-pass', default=0.1, show_default=True)
-@click.option('--savgol-order', default=4, show_default=True)
+@click.option('--high-pass', default=0.01, show_default=True)
 @click.option('--hemi', type=click.Choice(['L', 'R']), default='L', show_default=True)
 @click.option('--tr', default=None, type=click.FLOAT, show_default=True)
+@click.option('--ncomps', default=100, type=click.INT, show_default=True)
 @click.option('--nthreads', default=1, show_default=True)
-def main(bids_dir, out_dir, fprep_dir, ricor_dir, subject, work_dir, start_from, denoising_strategy,
-         session, task, space, gm_thresh, high_pass_type, high_pass, savgol_order, hemi, tr, nthreads):
+def main(bids_dir, out_dir, fprep_dir, ricor_dir, subject, work_dir, start_from, session, task, space,
+         gm_thresh, high_pass_type, high_pass, hemi, tr, ncomps, nthreads):
     """ Main API of pybest. """
 
     ##### set + check parameters #####
@@ -46,9 +45,11 @@ def main(bids_dir, out_dir, fprep_dir, ricor_dir, subject, work_dir, start_from,
         for ii, ses in enumerate(cfg['session'][i]):
             for task in cfg['task'][i][ii]:
                 logger.info(f"Starting process for sub-{sub}, ses-{ses}, task-{task}")
+                for key, value in [('sub', sub), ('ses', ses), ('task', task)]:
+                    cfg[key] = value
 
                 # ddict = data dictionary
-                ddict = find_data(sub, ses, task, cfg, logger)
+                ddict = find_data(cfg, logger)
                 
                 if tr is None:
                     tr = np.round(nib.load(ddict['funcs'][0]).header['pixdim'][4], 3)
@@ -63,11 +64,11 @@ def main(bids_dir, out_dir, fprep_dir, ricor_dir, subject, work_dir, start_from,
                     ddict = preprocess_events(ddict, cfg, logger)
                     
                     logger.info("Saving preprocessed data")
-                    save_preproc_data(sub, ses, task, ddict, cfg)
+                    save_preproc_data(ddict, cfg)
                 
                 # If we did preprocessing already ...
                 if start_from == 'noiseproc':
-                    ddict = load_preproc_data(sub, ses, task, ddict, cfg)
+                    ddict = load_preproc_data(ddict, cfg)
                 
                 # ... and didn't do noiseprocessing yet ...
                 if not start_from == 'signalproc':
@@ -77,7 +78,7 @@ def main(bids_dir, out_dir, fprep_dir, ricor_dir, subject, work_dir, start_from,
                 else:
                     # If we did, load the denoised data
                     logger.info("Loading denoised data")
-                    ddict = load_denoised_data(sub, ses, task, ddict, cfg)
+                    ddict = load_denoised_data(ddict, cfg)
 
                 # DANIEL, YOU START HERE. YOU MAY ASSUME YOU HAVE THE FOLLOWING VARIABLES:
                 # - func_data: 2D array (time x voxels)

@@ -8,7 +8,7 @@ from nilearn import image, masking, signal
 from scipy.signal import savgol_filter
 from nistats.design_matrix import _cosine_drift as dct_set
 from sklearn.decomposition import PCA
-from .utils import _load_gifti, tqdm_out
+from .utils import _load_gifti
 
 
 def preprocess_funcs(ddict, cfg, logger):
@@ -69,7 +69,7 @@ def preprocess_funcs(ddict, cfg, logger):
     logger.info("Starting preprocessing of functional data ... ")
 
     data_, run_idx_ = [], []
-    for i, func in enumerate(tqdm(ddict['funcs'], file=tqdm_out)):
+    for i, func in enumerate(tqdm(ddict['funcs'])):
 
         # Load data
         if 'fs' in cfg['space']:  # assume gifti
@@ -136,9 +136,19 @@ def preprocess_confs(ddict, cfg, logger):
         
         # Perform PCA and store in dataframe
         # Only store 100 components (might change)
-        data = pca.fit_transform(data)[:, :100]
+        data = pca.fit_transform(data)
+        if data.shape[1] > cfg['ncomps']:
+            cfg['ncomps'] = data.shape[1]
+            logger.warning(
+                f"Setting ncomps to {cfg['ncomps']}, because the PCA "
+                 "decomposition yielded fewer components than ncomps."
+            )
+
+        # Extract desired number of components
+        data = data[:, :cfg['ncomps']]
+
         n_comp_for_90r2 = np.argmax(np.cumsum(pca.explained_variance_ratio_) >= 0.9)
-        logger.info(f"PCA needed {n_comp_for_90r2} components to explain 90% of the variance for run {i+1}")
+        logger.info(f"PCA needed {n_comp_for_90r2} comps to explain 90% of the variance for run {i+1}")
 
         cols = [f'pca_{str(c+1).zfill(3)}' for c in range(data.shape[1])]
         data = pd.DataFrame(data, columns=cols)
@@ -188,7 +198,7 @@ def hp_filter(data, ddict, cfg, logger):
         data = signal.clean(data, detrend=False, standardize='zscore', confounds=hp_set)
     else:  # savgol, hardcode polyorder
         window = int(np.round((1 / cfg['high_pass']) / tr))
-        hp_sig = savgol_filter(data, window_length=window, polyorder=3, axis=0)
+        hp_sig = savgol_filter(data, window_length=window, polyorder=2, axis=0)
         data -= hp_sig
         data = (data - data.mean(axis=0)) / data.std(axis=0)
     
@@ -196,7 +206,7 @@ def hp_filter(data, ddict, cfg, logger):
 
 
 def save_preproc_data(sub, ses, task, ddict, cfg):
-
+    # Maybe just move this inside the preprocessing functions?
     out_dir = op.join(cfg['work_dir'], f'sub-{sub}', f'ses-{ses}', 'preproc')
     if not op.isdir(out_dir):
         os.makedirs(out_dir)
