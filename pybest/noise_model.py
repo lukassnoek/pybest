@@ -10,6 +10,26 @@ from joblib import Parallel, delayed
 from sklearn.metrics import r2_score
 from sklearn.linear_model import Ridge
 from sklearn.model_selection import KFold
+from .constants import ALPHAS
+
+
+def _fit_ridge(cv_repeats, cv_splits, alpha, seeds, X, y):
+
+    # Pre-allocate prediction array
+    preds = np.zeros_like(y)
+
+    # Use repeated KFold for stability (averaged over later)
+    for i in range(cv_repeats):
+        cv = KFold(n_splits=cv_splits, shuffle=True, random_state=seeds[i])
+        model = Ridge(alpha=alpha, fit_intercept=False)
+
+        # Start cross-validation loop
+        for train_idx, test_idx in cv.split(X):
+            model.fit(X[train_idx, :], y[train_idx, :])
+            preds[test_idx, :] += model.predict(X[test_idx, :])
+        
+    preds /= cv_repeats
+    return preds
 
 
 def _run_parallel(run, ddict, cfg, logger, alphas, n_comps, seeds):
@@ -19,7 +39,7 @@ def _run_parallel(run, ddict, cfg, logger, alphas, n_comps, seeds):
     func = ddict['preproc_func'][t_idx, :]
     conf = ddict['preproc_conf'].loc[t_idx, :].to_numpy()
     K = func.shape[1]  # nr of voxels
-        
+
     # Pre-allocate R2-scores (components x alphas x voxels)
     r2s = np.zeros((n_comps.size, alphas.size, K))
 
@@ -33,22 +53,9 @@ def _run_parallel(run, ddict, cfg, logger, alphas, n_comps, seeds):
         # Loop across different regularization params
         # Note to self: we can use FastRidge here
         for ii, alpha in enumerate(alphas):
-            # Pre-allocate prediction array
-            preds = np.zeros_like(func)
+            preds = _fit_ridge(cfg['cv_repeats'], cfg['cv_repeats'], alpha, seeds, X, func)
 
-            # Use repeated KFold for stability (averaged over later)
-            # Extract function from this (also used in main func)
-            for iii in range(cfg['cv_repeats']):
-                cv = KFold(n_splits=cfg['cv_splits'], shuffle=True, random_state=seeds[iii])
-                model = Ridge(alpha=alpha, fit_intercept=False)
-
-                # Start cross-validation loop
-                for train_idx, test_idx in cv.split(X):
-                    model.fit(X[train_idx, :], func[train_idx, :])
-                    preds[test_idx, :] += model.predict(X[test_idx, :])
-            
             # Average predictions across repeats and compute R2
-            preds /= cfg['cv_repeats']
             r2s[i, ii, :] = r2_score(func, preds, multioutput='raw_values')
 
     # Set voxels without signal to 0 (otherwise it'll be 1)
@@ -64,7 +71,6 @@ def run_noise_processing(ddict, cfg, logger):
     logger.info(f"Starting denoising with {cfg['ncomps']} components")
     
     # ALPHAS is so far hard-coded
-    ALPHAS = np.array([0, 0.01, 1, 10, 100, 500, 1000, 5000])    
     n_comps = np.arange(1, cfg['ncomps']+1)  # range of components to test
     
     # Maybe add a "meta-seed" to cli options to ensure reproducibility?
@@ -84,6 +90,7 @@ def run_noise_processing(ddict, cfg, logger):
         
         # Neat trick to do an argmax over two dims
         # opt_params: 2 (ncomps, alpha) x K (vox)
+        # ToDo: should we really go for the max, or should we somehow "regularize" it?
         opt_params = np.c_[np.unravel_index(
             r2s_2D.argmax(axis=0), shape=r2s.shape[:2]
         )].T.astype(int)
@@ -117,22 +124,9 @@ def run_noise_processing(ddict, cfg, logger):
             # Index func data / confound matrix
             to_denoise = func[:, vox_idx]
             X = conf[:, :n_comp]
-            
-            preds = np.zeros_like(to_denoise)
-            model = Ridge(alpha=alpha, fit_intercept=False)
 
-            # Use repeated KFold for stability (averaged over later)
-            for iii in range(cfg['cv_repeats']):
-                # Need to fix the shuffle (should be the same as earlier)
-                cv = KFold(n_splits=cfg['cv_splits'], shuffle=True, random_state=seeds[iii])
-                
-                # Start cross-validation loop
-                for train_idx, test_idx in cv.split(X):
-                    model.fit(X[train_idx, :], to_denoise[train_idx, :])
-                    preds[test_idx, :] += model.predict(X[test_idx, :])
-        
-            # Average predictions across repeats and subtract from func
-            preds /= cfg['cv_repeats']
+            # Get predictions
+            preds = _fit_ridge(cfg['cv_repeats'], cfg['cv_splits'], alpha, seeds, X, to_denoise)
             this_denoised_func[:, vox_idx] = to_denoise - preds
 
         # Extract actual optimal parameters (not indices)
@@ -147,6 +141,7 @@ def run_noise_processing(ddict, cfg, logger):
         for i in range(n_comps.size):
             n_comps_range[i, :] = r2s[i, :, :].max(axis=0)
 
+        # Save stuff
         out_dir = op.join(cfg['work_dir'], f'sub-{sub}', f'ses-{ses}', 'denoising')
         if not op.isdir(out_dir):
             os.makedirs(out_dir)
@@ -169,7 +164,7 @@ def run_noise_processing(ddict, cfg, logger):
     img = masking.unmask(denoised_func, ddict['mask'])
     img.to_filename(op.join(out_dir, f_out))
 
-    # Bit hacky (but good for RAM)
+    # Get 4D files with parameters: X x Y x Z x (params)
     alpha_files = sorted(glob(op.join(out_dir, '*desc-opt_alpha.nii.gz')))
     ncomps_files = sorted(glob(op.join(out_dir, '*desc-opt_ncomps.nii.gz')))
     ddict['alpha_data'] = image.concat_imgs(alpha_files)

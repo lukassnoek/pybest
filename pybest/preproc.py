@@ -7,7 +7,7 @@ from tqdm import tqdm
 from nilearn import image, masking, signal
 from scipy.signal import savgol_filter
 from nistats.design_matrix import _cosine_drift as dct_set
-from sklearn.decomposition import PCA
+from sklearn.decomposition import PCA, FastICA
 from .utils import _load_gifti
 
 
@@ -97,7 +97,7 @@ def preprocess_confs(ddict, cfg, logger):
     """
     
     logger.info("Starting preprocessing of confounds")
-    pca = PCA()
+    decomp = PCA() if cfg['decomp'] == 'pca' else FastICA(max_iter=1000)
     
     data_ = []
     for i, conf in enumerate(ddict['confs']):
@@ -118,22 +118,19 @@ def preprocess_confs(ddict, cfg, logger):
         data = hp_filter(data.to_numpy(), ddict, cfg, logger)
         
         # Perform PCA
-        data = pca.fit_transform(data)
+        data = decomp.fit_transform(data)
         if data.shape[1] < cfg['ncomps']:
             cfg['ncomps'] = data.shape[1]
             logger.warning(
-                f"Setting ncomps to {cfg['ncomps']}, because the PCA "
+                f"Setting ncomps to {cfg['ncomps']}, because the {cfg['decomp']} "
                  "decomposition yielded fewer components than ncomps."
             )
 
         # Extract desired number of components
         data = data[:, :cfg['ncomps']]
 
-        n_comp_for_90r2 = np.argmax(np.cumsum(pca.explained_variance_ratio_) >= 0.9)
-        logger.info(f"PCA needed {n_comp_for_90r2} comps to explain 90% of the variance for run {i+1}")
-
         # Make proper dataframe
-        cols = [f'pca_{str(c+1).zfill(3)}' for c in range(data.shape[1])]
+        cols = [f'decomp_{str(c+1).zfill(3)}' for c in range(data.shape[1])]
         data = pd.DataFrame(data, columns=cols)
         data_.append(data)
 
