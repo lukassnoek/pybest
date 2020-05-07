@@ -26,7 +26,7 @@ def _run_parallel(run, ddict, cfg, logger, alphas, n_comps, seeds):
     # Loop over number of components
     for i, n_comp in enumerate(tqdm(n_comps, desc=f'run {run+1}')):
         # Extract design matrix (with n_comp components)
-        if n_comp >= conf.shape[1]:
+        if n_comp > conf.shape[1]:
             raise ValueError(f"Cannot select {n_comp} variables from conf data with {conf.shape[1]} components.")
 
         X = conf[:, :n_comp]
