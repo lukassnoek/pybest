@@ -56,18 +56,35 @@ def preprocess_funcs(ddict, cfg, logger):
         # Add to run index
         run_idx_.append(np.ones(data.shape[0]) * i)
 
+    # Save run-wise data
+    out_dir = op.join(cfg['out_dir'], 'preproc')
+    for i, data in enumerate(data_):
+        # maybe other name/desc (is the same as fmriprep output now)
+        f_out = op.join(out_dir, cfg['f_base'] + f'_run-{i+1}_desc-preproc_bold.nii.gz')
+        masking.unmask(data, ddict['mask']).to_filename(f_out)
+
     # Concatenate data in time dimension
-    data_ = np.vstack(data_)
-    run_idx_ = np.concatenate(run_idx_)
+    data = np.vstack(data_)
+    run_idx = np.concatenate(run_idx_)
+
+    f_out = op.join(out_dir, cfg['f_base'] + '_desc-preproc_bold.npy')
+    np.save(f_out, data)
+    np.save(op.join(out_dir, 'run_idx.npy'), run_idx)
+
+    # TO FIX: write out all data if there's no mask
+    masking.unmask(data, ddict['mask']).to_filename(f_out.replace('npy', 'nii.gz'))
+    f_out = f_out.replace('bold.npy', 'mask.nii.gz')
+    if ddict['mask'] is not None:
+        ddict['mask'].to_filename(f_out)
 
     logger.info(
-        f"HP-filtered/normalized func data has {data_.shape[0]} timepoints "
-        f"(across {i+1} runs) and {data_.shape[1]} voxels"
+        f"HP-filtered/normalized func data has {data.shape[0]} timepoints "
+        f"(across {i+1} runs) and {data.shape[1]} voxels"
     )
 
     # Store in data-dictionary (ddict)
-    ddict['preproc_func'] = data_
-    ddict['run_idx'] = run_idx_
+    ddict['preproc_func'] = data
+    ddict['run_idx'] = run_idx
     return ddict
 
 
@@ -120,13 +137,21 @@ def preprocess_confs(ddict, cfg, logger):
         data = pd.DataFrame(data, columns=cols)
         data_.append(data)
 
-    # Concatenate DataFrames
-    data_ = pd.concat(data_, axis=0)
+    out_dir = op.join(cfg['out_dir'], 'preproc')
+    for i, data in enumerate(data_):
+        f_out = op.join(out_dir, cfg['f_base'] + f'_run-{i+1}_desc-preproc_conf.tsv')
+        data.to_csv(f_out, sep='\t', index=False)
+
+    # Concatenate DataFrames and save
+    data = pd.concat(data_, axis=0)
+    f_out = op.join(out_dir, cfg['f_base'] + '_desc-preproc_conf.tsv')
+    data.to_csv(f_out, sep='\t', index=False)    
+
     logger.info(
-        f"HP-filtered/normalized confound data has {data_.shape[0]} timepoints "
-        f"(across {i+1} runs) and {data_.shape[1]} components."
+        f"HP-filtered/normalized confound data has {data.shape[0]} timepoints "
+        f"(across {i+1} runs) and {data.shape[1]} components."
     )
-    ddict['preproc_conf'] = data_
+    ddict['preproc_conf'] = data
     return ddict
 
 
@@ -147,9 +172,17 @@ def preprocess_events(ddict, cfg, logger):
         data['run'] = i+1
         data_.append(data)
 
-    data_ = pd.concat(data_, axis=0)
-    logger.info(f"Found in total {data_.shape[0]} events across {i+1} runs")
-    ddict['preproc_events'] = data_
+    out_dir = op.join(cfg['out_dir'], 'preproc')
+    for i, data in enumerate(data_):
+        f_out = op.join(out_dir, cfg['f_base'] + f'_run-{i+1}_desc-preproc_events.tsv')
+        data.to_csv(f_out, sep='\t', index=False)
+
+    data = pd.concat(data_, axis=0)
+    f_out = op.join(out_dir, cfg['f_base'] + '_desc-preproc_events.tsv')
+    data.to_csv(f_out, sep='\t', index=False)
+
+    logger.info(f"Found in total {data.shape[0]} events across {i+1} runs")
+    ddict['preproc_events'] = data
     return ddict
 
 
@@ -170,34 +203,6 @@ def hp_filter(data, ddict, cfg, logger):
         data = (data - data.mean(axis=0)) / data.std(axis=0)
     
     return data
-
-
-def save_preproc_data(ddict, cfg):
-    # Maybe just move this inside the preprocessing functions?
-    sub, ses, task = cfg['sub'], cfg['ses'], cfg['task']
-    out_dir = op.join(cfg['work_dir'], f'sub-{sub}', f'ses-{ses}', 'preproc')
-    if not op.isdir(out_dir):
-        os.makedirs(out_dir)
-
-    f_base = f'sub-{sub}_ses-{ses}_task-{task}'
-    f_out = op.join(out_dir, f_base + '_desc-preproc_bold.npy')
-    np.save(f_out, ddict['preproc_func'])
-    
-    # TO FIX: write out all data if there's no mask
-    func_data_img = masking.unmask(ddict['preproc_func'], ddict['mask'])
-    func_data_img.to_filename(f_out.replace('npy', 'nii.gz'))
-
-    np.save(op.join(out_dir, 'run_idx.npy'), ddict['run_idx'])
-
-    f_out = f_out.replace('bold.npy', 'mask.nii.gz')
-    if ddict['mask'] is not None:
-        ddict['mask'].to_filename(f_out)
-
-    f_out = f_out.replace('mask.nii.gz', 'conf.tsv')
-    ddict['preproc_conf'].to_csv(f_out, sep='\t', index=False)
-
-    f_out = f_out.replace('conf', 'events')
-    ddict['preproc_events'].to_csv(f_out, sep='\t', index=False)
 
 
 def load_preproc_data(ddict, cfg):
