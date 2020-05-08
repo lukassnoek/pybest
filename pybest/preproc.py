@@ -58,6 +58,9 @@ def preprocess_funcs(ddict, cfg, logger):
 
     # Save run-wise data
     out_dir = op.join(cfg['out_dir'], 'preproc')
+    if not op.isdir(out_dir):
+        os.makedirs(out_dir)
+
     for i, data in enumerate(data_):
         # maybe other name/desc (is the same as fmriprep output now)
         f_out = op.join(out_dir, cfg['f_base'] + f'_run-{i+1}_desc-preproc_bold.nii.gz')
@@ -108,6 +111,7 @@ def preprocess_confs(ddict, cfg, logger):
         data = data.drop(to_remove, axis=1)
 
         if ddict['ricors'] is not None:  # add RETROICOR regressors, if any
+            
             ricor_data = pd.read_csv(ddict['ricors'][i], sep='\t')
             data = pd.concat((data, ricor_data), axis=1)
         
@@ -174,10 +178,15 @@ def preprocess_events(ddict, cfg, logger):
         f_out = op.join(out_dir, cfg['f_base'] + f'_run-{i+1}_desc-preproc_events.tsv')
         data.to_csv(f_out, sep='\t', index=False)
 
+    # Adjust onsets for concatenated events file
+    for run in np.unique(ddict['run_idx']).astype(int):
+        prev_run = ddict['run_idx'] < run
+        data_[run].loc[:, 'onset'] = data_[run].loc[:, 'onset'] + prev_run.sum() * ddict['tr']
+
     data = pd.concat(data_, axis=0)
     f_out = op.join(out_dir, cfg['f_base'] + '_desc-preproc_events.tsv')
     data.to_csv(f_out, sep='\t', index=False)
-
+    
     logger.info(f"Found in total {data.shape[0]} events across {i+1} runs")
     ddict['preproc_events'] = data
     return ddict
