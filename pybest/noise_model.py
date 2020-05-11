@@ -9,7 +9,7 @@ from nilearn import masking, signal, image
 from joblib import Parallel, delayed
 from sklearn.metrics import r2_score
 from sklearn.linear_model import Ridge
-from sklearn.model_selection import KFold
+from sklearn.model_selection import RepeatedKFold
 from .constants import ALPHAS
 
 
@@ -18,26 +18,25 @@ from .constants import ALPHAS
 # - keep track of "optimal" predictors in _fit_ridge, so we don't have to refit
 #   the model to regress it out?
 
-def _fit_ridge(cv_repeats, cv_splits, alpha, seeds, X, y):
+def _fit_ridge(X, y, alpha, cv):
 
     # Pre-allocate prediction array
-    preds = np.zeros_like(y)
+    r2 = np.zeros(y.shape[-1])
 
     # Use repeated KFold for stability (averaged over later)
-    for i in range(cv_repeats):
-        cv = KFold(n_splits=cv_splits, shuffle=True, random_state=seeds[i])
-        model = Ridge(alpha=alpha, fit_intercept=False)
-
-        # Start cross-validation loop
-        for train_idx, test_idx in cv.split(X):
-            model.fit(X[train_idx, :], y[train_idx, :])
-            preds[test_idx, :] += model.predict(X[test_idx, :])
+    model = Ridge(alpha=alpha, fit_intercept=False)
+    for train_idx, test_idx in cv.split(X, y):
+        X_train, y_train = X[train_idx], y[train_idx]
+        X_test, y_test = X[test_idx], y[test_idx]
+        model.fit(X_train, y_train)
+        r2 += r2_score(y_test, model.predict(X_test), multioutput='raw_values')
         
-    preds /= cv_repeats
-    return preds
+    # Average R2-scores across splits
+    r2 /= cv.get_n_splits()
+    return r2
 
 
-def _run_parallel(run, ddict, cfg, logger, alphas, n_comps, seeds):
+def _run_parallel(run, ddict, cfg, logger, alphas, n_comps, cv):
     
     # Find indices of timepoints belong to this run
     t_idx = ddict['run_idx'] == run
@@ -61,10 +60,7 @@ def _run_parallel(run, ddict, cfg, logger, alphas, n_comps, seeds):
         # Note to self: we can use FastRidge here (pre-compute SVD)
         for ii, alpha in enumerate(alphas):
             # Get average predictions (across cv-repeats)
-            preds = _fit_ridge(cfg['cv_repeats'], cfg['cv_splits'], alpha, seeds, X, func)
-
-            # Compute R2 of predictions
-            r2s[i, ii, :] = r2_score(func, preds, multioutput='raw_values')
+            r2s[i, ii, :] = _fit_ridge(X, func, alpha, cv)
 
     # Set voxels without signal to 0 (otherwise it'll have an R2 of 1)
     no_sig = func.mean(axis=0) == 0
@@ -80,12 +76,13 @@ def run_noise_processing(ddict, cfg, logger):
     n_comps = np.arange(1, cfg['ncomps']+1)  # range of components to test
     
     # Maybe add a "meta-seed" to cli options to ensure reproducibility?
-    seeds = np.random.randint(low=0, high=100000, size=cfg['cv_repeats'])
-
+    seed = np.random.randint(10e5)
+    cv = RepeatedKFold(n_splits=cfg['cv_splits'], n_repeats=cfg['cv_repeats'], random_state=seed)
+ 
     #ddict['preproc_conf'].loc[:, :] = np.random.normal(0, 1, size=ddict['preproc_conf'].shape)
     # Parallel computation of R2 array (n_comps x alphas x voxels) across runs
     r2s_lst = Parallel(n_jobs=cfg['nthreads'])(delayed(_run_parallel)(
-        run, ddict, cfg, logger, ALPHAS, n_comps, seeds)
+        run, ddict, cfg, logger, ALPHAS, n_comps, cv)
         for run in np.unique(ddict['run_idx']).astype(int)
     )
 
@@ -113,7 +110,7 @@ def run_noise_processing(ddict, cfg, logger):
         conf = ddict['preproc_conf'].loc[t_idx, :].to_numpy()
        
         # this_denoised_func (corresponds to current run)
-        this_denoised_func = np.zeros_like(func)
+        this_denoised_func = func.copy()
 
         # uniq_combs: unique combinations of optimal parameter indices (2 x combs)
         uniq_combs = np.unique(opt_param_idx, axis=1).astype(int)
@@ -129,7 +126,6 @@ def run_noise_processing(ddict, cfg, logger):
             n_comp = n_comps[these_param_idx[0]]
             alpha = ALPHAS[these_param_idx[1]]
             if n_comp == -1:  # do not denoise when R2 < 0
-                this_denoised_func[:, vox_idx] = to_denoise
                 continue
 
             # Index func data / confound matrix
@@ -137,7 +133,8 @@ def run_noise_processing(ddict, cfg, logger):
             X = conf[:, :n_comp]
 
             # Get predictions
-            preds = _fit_ridge(cfg['cv_repeats'], cfg['cv_splits'], alpha, seeds, X, to_denoise)
+            model = Ridge(alpha=alpha, fit_intercept=False)
+            preds = model.fit(X, func[:, vox_idx]).predict(X)
             this_denoised_func[:, vox_idx] = to_denoise - preds
             #max_r2_check[vox_idx] = r2_score(to_denoise, preds, multioutput='raw_values')
 
