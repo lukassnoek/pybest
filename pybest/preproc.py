@@ -56,15 +56,15 @@ def preprocess_funcs(ddict, cfg, logger):
         # Add to run index
         run_idx_.append(np.ones(data.shape[0]) * i)
 
-    # Save run-wise data
     out_dir = op.join(cfg['out_dir'], 'preproc')
     if not op.isdir(out_dir):
         os.makedirs(out_dir)
 
-    for i, data in enumerate(data_):
-        # maybe other name/desc (is the same as fmriprep output now)
-        f_out = op.join(out_dir, cfg['f_base'] + f'_run-{i+1}_desc-preproc_bold.nii.gz')
-        masking.unmask(data, ddict['mask']).to_filename(f_out)
+    if cfg['save_all']:  # Save run-wise data as niftis for inspection
+        for i, data in enumerate(data_):
+            # maybe other name/desc (is the same as fmriprep output now)
+            f_out = op.join(out_dir, cfg['f_base'] + f'_run-{i+1}_desc-preproc_bold.nii.gz')
+            masking.unmask(data, ddict['mask']).to_filename(f_out)
 
     # Concatenate data in time dimension
     data = np.vstack(data_)
@@ -75,7 +75,6 @@ def preprocess_funcs(ddict, cfg, logger):
     np.save(op.join(out_dir, 'run_idx.npy'), run_idx)
 
     # TO FIX: write out all data if there's no mask
-    masking.unmask(data, ddict['mask']).to_filename(f_out.replace('npy', 'nii.gz'))
     f_out = f_out.replace('bold.npy', 'mask.nii.gz')
     if ddict['mask'] is not None:
         ddict['mask'].to_filename(f_out)
@@ -123,15 +122,15 @@ def preprocess_confs(ddict, cfg, logger):
         
         # Perform PCA
         data = decomp.fit_transform(data)
-        if data.shape[1] < cfg['ncomps']:
-            cfg['ncomps'] = data.shape[1]
+        if data.shape[1] < cfg['n_comps']:
+            cfg['n_comps'] = data.shape[1]
             logger.warning(
-                f"Setting ncomps to {cfg['ncomps']}, because the {cfg['decomp']} "
-                 "decomposition yielded fewer components than ncomps."
+                f"Setting n-comps to {cfg['n_comps']}, because the {cfg['decomp']} "
+                 "decomposition yielded fewer components than n-comps."
             )
 
         # Extract desired number of components
-        data = data[:, :cfg['ncomps']]
+        data = data[:, :cfg['n_comps']]
 
         # Make proper dataframe
         cols = [f'decomp_{str(c+1).zfill(3)}' for c in range(data.shape[1])]
@@ -139,9 +138,10 @@ def preprocess_confs(ddict, cfg, logger):
         data_.append(data)
 
     out_dir = op.join(cfg['out_dir'], 'preproc')
-    for i, data in enumerate(data_):
-        f_out = op.join(out_dir, cfg['f_base'] + f'_run-{i+1}_desc-preproc_conf.tsv')
-        data.to_csv(f_out, sep='\t', index=False)
+    if cfg['save_all']:
+        for i, data in enumerate(data_):
+            f_out = op.join(out_dir, cfg['f_base'] + f'_run-{i+1}_desc-preproc_conf.tsv')
+            data.to_csv(f_out, sep='\t', index=False)
 
     # Concatenate DataFrames and save
     data = pd.concat(data_, axis=0)
@@ -174,9 +174,10 @@ def preprocess_events(ddict, cfg, logger):
         data_.append(data)
 
     out_dir = op.join(cfg['out_dir'], 'preproc')
-    for i, data in enumerate(data_):
-        f_out = op.join(out_dir, cfg['f_base'] + f'_run-{i+1}_desc-preproc_events.tsv')
-        data.to_csv(f_out, sep='\t', index=False)
+    if cfg['save_all']:
+        for i, data in enumerate(data_):
+            f_out = op.join(out_dir, cfg['f_base'] + f'_run-{i+1}_desc-preproc_events.tsv')
+            data.to_csv(f_out, sep='\t', index=False)
 
     # Adjust onsets for concatenated events file
     for run in np.unique(ddict['run_idx']).astype(int):

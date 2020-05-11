@@ -27,12 +27,13 @@ from .noise_model import run_noise_processing, load_denoised_data
 @click.option('--hemi', type=click.Choice(['L', 'R']), default='L', show_default=True)
 @click.option('--tr', default=None, type=click.FLOAT, show_default=True)
 @click.option('--decomp', default='pca', type=click.Choice(['pca', 'ica']), show_default=True)
-@click.option('--ncomps', default=100, type=click.INT, show_default=True)
+@click.option('--n-comps', default=100, type=click.INT, show_default=True)
 @click.option('--cv-repeats', default=2, type=click.INT, show_default=True)
 @click.option('--cv-splits', default=5, type=click.INT, show_default=True)
-@click.option('--nthreads', default=1, show_default=True)
+@click.option('--n-cpus', default=1, show_default=True)
+@click.option('--save-all', is_flag=True)
 def main(bids_dir, out_dir, fprep_dir, ricor_dir, subject, work_dir, start_from, session, task, space,
-         gm_thresh, high_pass_type, high_pass, hemi, tr, decomp, ncomps, cv_repeats, cv_splits, nthreads):
+         gm_thresh, high_pass_type, high_pass, hemi, tr, decomp, n_comps, cv_repeats, cv_splits, n_cpus, save_all):
     """ Main API of pybest. """
 
     ##### set + check parameters #####
@@ -55,7 +56,6 @@ def main(bids_dir, out_dir, fprep_dir, ricor_dir, subject, work_dir, start_from,
 
                 for key, value in [('sub', sub), ('ses', ses), ('task', task)]:
                     cfg[key] = value
-
 
                 # ddict = data dictionary
                 ddict = find_data(cfg, logger)

@@ -414,3 +414,40 @@ if __name__ == "__main__":
 		r2_img, colorbar=False, cut_coords=coords,
 		display_mode='z', draw_cross=False,
 		title=title, black_bg=False, annotate=False)
+
+
+"""
+        # Extract data to be denoised
+        t_idx = ddict['run_idx'] == run
+        func = ddict['preproc_func'][t_idx, :]
+        conf = ddict['preproc_conf'].loc[t_idx, :].to_numpy()
+       
+        # this_denoised_func (corresponds to current run)
+        this_denoised_func = func.copy()
+
+        # uniq_combs: unique combinations of optimal parameter indices (2 x combs)
+        uniq_combs = np.unique(opt_param_idx, axis=1).astype(int)
+        #max_r2_check = np.zeros(max_r2.size)
+        for uix in range(uniq_combs.shape[1]):  # loop over combinations
+            # Current combination of n_comps and alpha *indices*
+            these_param_idx = uniq_combs[:, uix]
+
+            # Which voxels have this combination of optimal params?
+            vox_idx = np.all(opt_param_idx == these_param_idx[:, np.newaxis], axis=0)
+
+            # Which parameters (n_comp, alpha) belong to this combination?
+            n_comp = n_comps[these_param_idx[0]]
+            alpha = ALPHAS[these_param_idx[1]]
+            if n_comp == -1:  # do not denoise when R2 < 0
+                continue
+
+            # Index func data / confound matrix
+            to_denoise = func[:, vox_idx]
+            X = conf[:, :n_comp]
+
+            # Get predictions
+            model = Ridge(alpha=alpha, fit_intercept=False)
+            preds = model.fit(X, func[:, vox_idx]).predict(X)
+            this_denoised_func[:, vox_idx] = to_denoise - preds
+            #max_r2_check[vox_idx] = r2_score(to_denoise, preds, multioutput='raw_values')
+        """
