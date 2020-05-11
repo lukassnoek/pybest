@@ -123,15 +123,15 @@ def preprocess_confs(ddict, cfg, logger):
         
         # Perform PCA
         data = decomp.fit_transform(data)
-        if data.shape[1] < cfg['ncomps']:
-            cfg['ncomps'] = data.shape[1]
+        if data.shape[1] < cfg['n_comps']:
+            cfg['n_comps'] = data.shape[1]
             logger.warning(
-                f"Setting ncomps to {cfg['ncomps']}, because the {cfg['decomp']} "
-                 "decomposition yielded fewer components than ncomps."
+                f"Setting n-comps to {cfg['n_comps']}, because the {cfg['decomp']} "
+                 "decomposition yielded fewer components than n-comps."
             )
 
         # Extract desired number of components
-        data = data[:, :cfg['ncomps']]
+        data = data[:, :cfg['n_comps']]
 
         # Make proper dataframe
         cols = [f'decomp_{str(c+1).zfill(3)}' for c in range(data.shape[1])]
