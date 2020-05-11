@@ -221,7 +221,7 @@ def load_preproc_data(ddict, cfg):
     ddict['preproc_func'] = np.load(f_in + 'bold.npy')
     ddict['preproc_conf'] = pd.read_csv(f_in + 'conf.tsv', sep='\t')
     ddict['preproc_events'] = pd.read_csv(f_in + 'events.tsv', sep='\t')
-    ddict['mask'] = nib.load(f_in + 'mask.nii.gz')
+    ddict['mask'] = None if 'fs' in cfg['space'] else nib.load(f_in + 'mask.nii.gz')
     ddict['run_idx'] = np.load(op.join(in_dir, 'run_idx.npy'))
 
     return ddict

@@ -1,16 +1,19 @@
 import io
 import os
+import click
 import os.path as op
 import logging
 import numpy as np
 import nibabel as nib
 from tqdm import tqdm
 from glob import glob
+from nilearn import plotting
+from nilearn.datasets import fetch_surf_fsaverage
 
 
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s [%(threadName)-8s] [%(levelname)-7.7s]  %(message)s",
+    format="%(asctime)s [%(levelname)-7.7s]  %(message)s",
     handlers=[
         logging.StreamHandler()
     ]
@@ -19,9 +22,10 @@ logging.basicConfig(
 logger = logging.getLogger('pybest')
 
 
-def check_parameters(space, tr):
-
-    if 'fs' in space and tr is None:
+def check_parameters(cfg, logger):
+    """ Checks parameter settings and raises errors in case of
+    incompatible parameters. """
+    if 'fs' in cfg['space'] and cfg['tr'] is None:
         raise ValueError("TR (--tr) needs to be set when using surface data (--space fs*)!")
 
 
@@ -183,3 +187,30 @@ def _load_gifti(f):
     """ Load gifti array. """
     f_gif = nib.load(f)
     return np.vstack([arr.data for arr in f_gif.darrays])
+
+@click.command()
+@click.argument('file')
+@click.option('--hemi', default='L', type=click.Choice(['L', 'R']), required=False)
+@click.option('--space', default='fsaverage6', type=click.Choice(['fsaverage', 'fsaverage5', 'fsaverage6']), required=False)
+@click.option('--fs-dir', default=None, required=False)
+@click.option('--threshold', default=0., type=click.FLOAT, required=False)
+def view_surf(file, hemi, space, fs_dir, threshold):
+    if fs_dir is not None:
+        mesh = op.join(fs_dir, 'surf', f"{hemi.lower()}h.inflated")
+        bg = op.join(fs_dir, 'surf', f"{hemi.lower()}h.sulc")
+    else:
+        hemi = 'left' if hemi == 'L' else 'right'
+        fs = fetch_surf_fsaverage(mesh=space)
+        mesh = fs[f"infl_{hemi}"]
+        bg = fs[f"sulc_{hemi}"]
+        
+    dat = np.load(file)
+    display = plotting.view_surf(
+        surf_mesh=mesh,
+        surf_map=dat,
+        bg_map=bg,
+        threshold=threshold
+    )
+    display.open_in_browser()
+
+

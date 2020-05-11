@@ -119,8 +119,9 @@ def run_noise_processing(ddict, cfg, logger):
 
         for dat, name in to_save:
             np.save(op.join(out_dir, f_base + name + '.npy'), dat)
-            img = masking.unmask(dat, ddict['mask'])
-            img.to_filename(op.join(out_dir, f_base + name + '.nii.gz'))
+            if ddict['mask'] is not None:
+                img = masking.unmask(dat, ddict['mask'])
+                img.to_filename(op.join(out_dir, f_base + name + '.nii.gz'))
         
         if cfg['save_all']:
             img = masking.unmask(r2_max_per_ncomp, ddict['mask'])
@@ -147,7 +148,11 @@ def load_denoised_data(ddict, cfg):
     ddict['preproc_conf'] = np.load(op.join(preproc_dir, f'sub-{sub}_ses-{ses}_task-{task}_desc-preproc_bold.npy'))
     ddict['preproc_conf'] = pd.read_csv(op.join(preproc_dir, f'sub-{sub}_ses-{ses}_task-{task}_desc-preproc_conf.tsv'), sep='\t')
     ddict['preproc_events'] = pd.read_csv(op.join(preproc_dir, f'sub-{sub}_ses-{ses}_task-{task}_desc-preproc_events.tsv'), sep='\t')
-    ddict['mask'] = nib.load(op.join(preproc_dir, f'sub-{sub}_ses-{ses}_task-{task}_desc-preproc_mask.nii.gz'))
+    
+    if 'fs' in cfg['space']:
+        ddict['mask'] = None
+    else:
+        ddict['mask'] = nib.load(op.join(preproc_dir, f'sub-{sub}_ses-{ses}_task-{task}_desc-preproc_mask.nii.gz'))
     ddict['run_idx'] = np.load(op.join(preproc_dir, 'run_idx.npy'))
 
     return ddict
