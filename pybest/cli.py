@@ -8,7 +8,9 @@ from .utils import logger, check_parameters, set_defaults
 from .utils import find_exp_parameters, find_data
 from .preproc import preprocess_funcs, preprocess_confs, preprocess_events
 from .preproc import load_preproc_data
-from .noise_model import run_noise_processing, load_denoised_data
+from .noise_model import run_noise_processing, load_denoising_data
+from .signal_model2 import run_signal_processing
+
 
 @click.command()
 @click.argument('bids_dir')
@@ -21,10 +23,11 @@ from .noise_model import run_noise_processing, load_denoised_data
 @click.option('--session', default=None, required=False)
 @click.option('--task', default=None)
 @click.option('--space', default='T1w', show_default=True)
+@click.option('--hemi', type=click.Choice(['L', 'R']), default='L', show_default=True)
 @click.option('--gm-thresh', default=0.9, show_default=True)  # maybe use a "mask" option
+@click.option('--slice-time-ref', type=click.FLOAT, default=0.5, show_default=True)
 @click.option('--high-pass-type', type=click.Choice(['dct', 'savgol']), default='dct', show_default=True)
 @click.option('--high-pass', default=0.01, show_default=True)
-@click.option('--hemi', type=click.Choice(['L', 'R']), default='L', show_default=True)
 @click.option('--tr', default=None, type=click.FLOAT, show_default=True)
 @click.option('--decomp', default='pca', type=click.Choice(['pca', 'ica']), show_default=True)
 @click.option('--n-comps', default=100, type=click.INT, show_default=True)
@@ -32,8 +35,8 @@ from .noise_model import run_noise_processing, load_denoised_data
 @click.option('--cv-splits', default=5, type=click.INT, show_default=True)
 @click.option('--n-cpus', default=1, show_default=True)
 @click.option('--save-all', is_flag=True)
-def main(bids_dir, out_dir, fprep_dir, ricor_dir, subject, work_dir, start_from, session, task, space,
-         gm_thresh, high_pass_type, high_pass, hemi, tr, decomp, n_comps, cv_repeats, cv_splits, n_cpus, save_all):
+def main(bids_dir, out_dir, fprep_dir, ricor_dir, subject, work_dir, start_from, session, task, space, hemi,
+         gm_thresh, slice_time_ref, high_pass_type, high_pass, tr, decomp, n_comps, cv_repeats, cv_splits, n_cpus, save_all):
     """ Main API of pybest. """
 
     ##### set + check parameters #####
@@ -49,6 +52,8 @@ def main(bids_dir, out_dir, fprep_dir, ricor_dir, subject, work_dir, start_from,
         for ii, ses in enumerate(cfg['session'][i]):
             for task in cfg['task'][i][ii]:
                 logger.info(f"Starting process for sub-{sub}, ses-{ses}, task-{task}")
+                
+                # Some bookkeeping
                 cfg['f_base'] = f"sub-{sub}_ses-{ses}_task-{task}"
                 cfg['out_dir'] = op.join(cfg['work_dir'], f'sub-{sub}', f'ses-{ses}')
                 if not op.isdir(cfg['out_dir']):
@@ -67,7 +72,7 @@ def main(bids_dir, out_dir, fprep_dir, ricor_dir, subject, work_dir, start_from,
                 # Store TR in data dict
                 ddict['tr'] = tr
 
-                if start_from == 'preproc':
+                if start_from not in ['noiseproc', 'signalproc']:
                     ddict = preprocess_funcs(ddict, cfg, logger)
                     ddict = preprocess_confs(ddict, cfg, logger)                    
                     ddict = preprocess_events(ddict, cfg, logger)
@@ -76,19 +81,17 @@ def main(bids_dir, out_dir, fprep_dir, ricor_dir, subject, work_dir, start_from,
                 if start_from == 'noiseproc':
                     ddict = load_preproc_data(ddict, cfg)
                 
-                # ... and didn't do noiseprocessing yet ...
+                # ... and didn't do noise processing yet ...
                 if not start_from == 'signalproc':
+                    # Run noise processing
                     ddict = run_noise_processing(ddict, cfg, logger)
                 else:
-                    # If we did, load the denoised data
-                    logger.info("Loading denoised data")
-                    ddict = load_denoised_data(ddict, cfg)
+                    # If we did do noise processing, load the denoising parameters
+                    logger.info("Loading denoising parameters")
+                    ddict = load_denoising_data(ddict, cfg)
 
-                # DANIEL, YOU START HERE. YOU MAY ASSUME YOU HAVE THE FOLLOWING VARIABLES:
-                # - func_data: 2D array (time x voxels)
-                # - event_data: dataframe (time x pca-decomposed confounds)
-                # - run_idx: 1D array (time)
-                # - bookkeeping stuff, e.g., sub (01), ses (1), task (face), work_dir, etc
+                # Always run signal processing
+                run_signal_processing(ddict, cfg, logger)
 
 
 if __name__ == '__main__':

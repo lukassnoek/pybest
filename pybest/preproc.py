@@ -5,10 +5,28 @@ import nibabel as nib
 import pandas as pd
 from tqdm import tqdm
 from nilearn import image, masking, signal
+from joblib import Parallel, delayed
 from scipy.signal import savgol_filter
 from nistats.design_matrix import _cosine_drift as dct_set
 from sklearn.decomposition import PCA, FastICA
 from .utils import _load_gifti
+
+
+def _run_func_parallel(ddict, cfg, run, func, logger):
+    
+    # Load data
+    if 'fs' in cfg['space']:  # assume gifti
+        data = _load_gifti(func)
+    else:
+        # Mask data and extract stuff
+        data = masking.apply_mask(func, ddict['mask'])
+
+    # By now, data is a 2D array (time x voxels)
+    data = hp_filter(data, ddict, cfg, logger)
+    
+    # Add to run index
+    run_idx = np.ones(data.shape[0]) * run
+    return data, run_idx
 
 
 def preprocess_funcs(ddict, cfg, logger):
@@ -39,36 +57,25 @@ def preprocess_funcs(ddict, cfg, logger):
     ddict['mask'] = mask
     logger.info("Starting preprocessing of functional data ... ")
 
-    data_, run_idx_ = [], []
-    for i, func in enumerate(tqdm(ddict['funcs'])):
+    out = Parallel(n_jobs=cfg['n_cpus'])(delayed(_run_func_parallel)
+        (ddict, cfg, run, func, logger)
+        for run, func in enumerate(tqdm(ddict['funcs']))
+    )
 
-        # Load data
-        if 'fs' in cfg['space']:  # assume gifti
-            data = _load_gifti(func)
-        else:
-            # Mask data and extract stuff
-            data = masking.apply_mask(func, ddict['mask'])
-
-        # By now, data is a 2D array (time x voxels)
-        data = hp_filter(data, ddict, cfg, logger)
-        data_.append(data)
-
-        # Add to run index
-        run_idx_.append(np.ones(data.shape[0]) * i)
-
+    logger.info("Saving preprocessed data to disk")
     out_dir = op.join(cfg['out_dir'], 'preproc')
     if not op.isdir(out_dir):
         os.makedirs(out_dir)
 
     if cfg['save_all']:  # Save run-wise data as niftis for inspection
-        for i, data in enumerate(data_):
+        for i, (data, _) in enumerate(out):
             # maybe other name/desc (is the same as fmriprep output now)
             f_out = op.join(out_dir, cfg['f_base'] + f'_run-{i+1}_desc-preproc_bold.nii.gz')
             masking.unmask(data, ddict['mask']).to_filename(f_out)
 
     # Concatenate data in time dimension
-    data = np.vstack(data_)
-    run_idx = np.concatenate(run_idx_)
+    data = np.vstack([d[0] for d in out])
+    run_idx = np.concatenate([r[1] for r in out]).astype(int)
 
     f_out = op.join(out_dir, cfg['f_base'] + '_desc-preproc_bold.npy')
     np.save(f_out, data)
@@ -197,22 +204,24 @@ def hp_filter(data, ddict, cfg, logger):
     """ High-pass filter (DCT or Savitsky-Golay). """
     n_vol = data.shape[0]
     tr = ddict['tr']
-    frame_times = np.linspace(0.5 * tr, n_vol * (tr + 0.5), n_vol, endpoint=False)
+    st_ref = cfg['slice_time_ref']
+    frame_times = np.linspace(st_ref * tr, n_vol * (tr + st_ref), n_vol, endpoint=False)
 
     # Create high-pass filter and clean
     if cfg['high_pass_type'] == 'dct':
-        hp_set = dct_set(cfg['high_pass'], frame_times)[:, :-1]  # remove intercept
+        hp_set = dct_set(cfg['high_pass'], frame_times)
         data = signal.clean(data, detrend=False, standardize='zscore', confounds=hp_set)
     else:  # savgol, hardcode polyorder
         window = int(np.round((1 / cfg['high_pass']) / tr))
         hp_sig = savgol_filter(data, window_length=window, polyorder=2, axis=0)
         data -= hp_sig
-        data = (data - data.mean(axis=0)) / data.std(axis=0)
-    
+        data = signal.clean(data, detrend=False, standardize='zscore')
+
     return data
 
 
 def load_preproc_data(ddict, cfg):
+    """ Loads preprocessed data. """
     sub, ses, task = cfg['sub'], cfg['ses'], cfg['task']
     in_dir = op.join(cfg['work_dir'], f'sub-{sub}', f'ses-{ses}', 'preproc')
     f_base = f'sub-{sub}_ses-{ses}_task-{task}_desc-preproc_'

@@ -12,6 +12,7 @@ from sklearn.linear_model import Ridge
 from sklearn.model_selection import RepeatedKFold
 from .constants import ALPHAS
 from .models import cross_val_r2
+from .utils import get_run_data, yield_uniq_params
 
 # IDEAS
 # - "smarter" way to determine optimal alpha/n_comps (better than argmax); regularize
@@ -19,15 +20,13 @@ from .models import cross_val_r2
 #   the model to regress it out?
 
 def _run_parallel(run, ddict, cfg, logger, alphas, n_comps, cv):
-    
+    """ Function to run each run in parallel. """
+
     # Find indices of timepoints belong to this run
-    t_idx = ddict['run_idx'] == run
-    func = ddict['preproc_func'][t_idx, :]
-    conf = ddict['preproc_conf'].loc[t_idx, :].to_numpy()
-    K = func.shape[1]  # nr of voxels
+    func, conf, _ = get_run_data(ddict, run, func_type='preproc')
 
     # Pre-allocate R2-scores (components x alphas x voxels)
-    r2s = np.zeros((n_comps.size, alphas.size, K))
+    r2s = np.zeros((n_comps.size, alphas.size, func.shape[1]))
 
     # Loop over number of components
     for i, n_comp in enumerate(tqdm(n_comps, desc=f'run {run+1}')):
@@ -65,16 +64,17 @@ def run_noise_processing(ddict, cfg, logger):
     #ddict['preproc_conf'].loc[:, :] = np.random.normal(0, 1, size=ddict['preproc_conf'].shape)
     
     # Parallel computation of R2 array (n_comps x alphas x voxels) across runs
-    r2s_lst = Parallel(n_jobs=cfg['n_cpus'])(delayed(_run_parallel)(
+    r2s_list = Parallel(n_jobs=cfg['n_cpus'])(delayed(_run_parallel)(
         run, ddict, cfg, logger, ALPHAS, n_comps, cv)
-        for run in np.unique(ddict['run_idx']).astype(int)
+        for run in np.unique(ddict['run_idx'])
     )
 
     # Compute "optimal" parameters and save to disk for inspection
     sub, ses, task = cfg['sub'], cfg['ses'], cfg['task']
-    ddict['opt_noise_alpha'] = []
-    ddict['opt_noise_n_comps'] = []
-    for run, r2s in enumerate(tqdm(r2s_lst)):
+    ddict['opt_noise_alpha'] = np.zeros((len(r2s_list), ddict['preproc_func'].shape[1]))
+    ddict['opt_noise_n_comps'] = np.zeros_like(ddict['opt_noise_alpha'])
+    func_clean = ddict['preproc_func'].copy()
+    for run, r2s in enumerate(tqdm(r2s_list)):
         K = r2s.shape[2]  # number of voxels
         # Compute maximum r2 across n-comps/alphas
         r2s_2d = r2s.reshape((np.prod(r2s.shape[:2]), K))
@@ -105,6 +105,20 @@ def run_noise_processing(ddict, cfg, logger):
         for i in range(n_comps.size):
             alpha_opt_per_ncomp[i, :] = ALPHAS[r2s[i, :, :].argmax(axis=0)]
 
+        # Save for signal processing
+        ddict['opt_noise_alpha'][run, :] = opt_alpha
+        ddict['opt_noise_n_comps'][run, :] = opt_n_comps
+
+        # Start denoising!
+        func, conf, _ = get_run_data(ddict, run, func_type='preproc')
+        for (this_n_comps, alpha), vox_idx in yield_uniq_params(ddict, run):
+            X = conf[:, :this_n_comps]
+            model = Ridge(alpha=alpha, fit_intercept=False)
+            func[:, vox_idx] -= model.fit(X, func[:, vox_idx]).predict(X)
+
+        func = signal.clean(func, detrend=False, standardize='zscore')
+        func_clean[ddict['run_idx'] == run, :] = func
+
         # Save stuff
         out_dir = op.join(cfg['work_dir'], f'sub-{sub}', f'ses-{ses}', 'denoising')
         if not op.isdir(out_dir):
@@ -115,6 +129,7 @@ def run_noise_processing(ddict, cfg, logger):
             (r2_max, 'max_r2'),
             (opt_alpha, 'opt_alpha'),
             (opt_n_comps, 'opt_ncomps'),
+            (func, 'denoised_bold')
         ]    
 
         for dat, name in to_save:
@@ -129,23 +144,27 @@ def run_noise_processing(ddict, cfg, logger):
             img = masking.unmask(alpha_opt_per_ncomp, ddict['mask'])
             img.to_filename(op.join(out_dir, f_base + 'ncomp_alpha.nii.gz'))
 
-        # Save for later
-        ddict['opt_noise_alpha'].append(opt_alpha)
-        ddict['opt_noise_n_comps'].append(opt_n_comps)
+    f_out = op.join(out_dir, cfg['f_base'] + '_desc-denoised_bold.npy')
+    np.save(f_out, func_clean)
+
+    ddict['denoised_func'] = func_clean
+    ddict['opt_noise_alpha'] = np.vstack(ddict['opt_noise_alpha']).astype(int)
+    ddict['opt_noise_n_comps'] = np.vstack(ddict['opt_noise_n_comps']).astype(int)
 
     return ddict
 
 
-def load_denoised_data(ddict, cfg):
-    
+def load_denoising_data(ddict, cfg):
+    """ Loads the denoising parameters/data. """
+
     sub, ses, task = cfg['sub'], cfg['ses'], cfg['task']
     preproc_dir = op.join(cfg['work_dir'], f'sub-{sub}', f'ses-{ses}', 'preproc')
     denoising_dir = op.join(cfg['work_dir'], f'sub-{sub}', f'ses-{ses}', 'denoising')
 
-    ddict['opt_noise_alpha'] = np.vstack([np.load(f) for f in sorted(glob(op.join(denoising_dir, '*-opt_alpha.npy')))])
-    ddict['opt_noise_n_comps'] = np.vstack([np.load(f) for f in sorted(glob(op.join(denoising_dir, '*-opt_ncomps.npy')))])
+    ddict['opt_noise_alpha'] = np.vstack([np.load(f) for f in sorted(glob(op.join(denoising_dir, '*-opt_alpha.npy')))]).astype(int)
+    ddict['opt_noise_n_comps'] = np.vstack([np.load(f) for f in sorted(glob(op.join(denoising_dir, '*-opt_ncomps.npy')))]).astype(int)
     
-    ddict['preproc_conf'] = np.load(op.join(preproc_dir, f'sub-{sub}_ses-{ses}_task-{task}_desc-preproc_bold.npy'))
+    ddict['denoised_func'] = np.load(op.join(denoising_dir, f'sub-{sub}_ses-{ses}_task-{task}_desc-denoised_bold.npy'))
     ddict['preproc_conf'] = pd.read_csv(op.join(preproc_dir, f'sub-{sub}_ses-{ses}_task-{task}_desc-preproc_conf.tsv'), sep='\t')
     ddict['preproc_events'] = pd.read_csv(op.join(preproc_dir, f'sub-{sub}_ses-{ses}_task-{task}_desc-preproc_events.tsv'), sep='\t')
     

@@ -25,6 +25,7 @@ logger = logging.getLogger('pybest')
 def check_parameters(cfg, logger):
     """ Checks parameter settings and raises errors in case of
     incompatible parameters. """
+    
     if 'fs' in cfg['space'] and cfg['tr'] is None:
         raise ValueError("TR (--tr) needs to be set when using surface data (--space fs*)!")
 
@@ -214,3 +215,31 @@ def view_surf(file, hemi, space, fs_dir, threshold):
     display.open_in_browser()
 
 
+def get_run_data(ddict, run, func_type='preproc'):
+    t_idx = ddict['run_idx'] == run
+    func = ddict[f'{func_type}_func'][t_idx, :]
+    conf = ddict['preproc_conf'].loc[t_idx, :].to_numpy()
+    events = ddict['preproc_events'].query("run == (@run + 1)")
+    return func.copy(), conf.copy(), events.copy()
+
+
+def yield_uniq_params(ddict, run):
+    """ Yields the voxel index of each unique combination of
+    denoising parameters (n_comps, alpha). """
+    opt_n_comps = ddict['opt_noise_n_comps'][run, :]
+    opt_alpha = ddict['opt_noise_alpha'][run, :]
+    opt_params = np.vstack([opt_n_comps[np.newaxis, :], opt_alpha[np.newaxis, :]])
+    uniq_combs = np.unique(opt_params, axis=1).astype(int)
+
+    # loop over combinations
+    for uix in range(uniq_combs.shape[1]):  
+        these_params = uniq_combs[:, uix]
+        if these_params[0] == 0:  # r2 is negative
+            continue
+        
+        vox_idx = np.logical_and(
+            opt_n_comps == these_params[0],
+            opt_alpha == these_params[1]
+        )
+            
+        yield these_params, vox_idx
