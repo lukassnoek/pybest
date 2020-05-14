@@ -12,7 +12,7 @@ from sklearn.linear_model import Ridge
 from sklearn.model_selection import RepeatedKFold
 from .constants import ALPHAS
 from .models import cross_val_r2
-from .utils import get_run_data, yield_uniq_params
+from .utils import get_run_data, yield_uniq_params, tqdm_ctm, tdesc
 
 # IDEAS
 # - "smarter" way to determine optimal alpha/n_comps (better than argmax); regularize
@@ -29,7 +29,7 @@ def _run_parallel(run, ddict, cfg, logger, alphas, n_comps, cv):
     r2s = np.zeros((n_comps.size, alphas.size, func.shape[1]))
 
     # Loop over number of components
-    for i, n_comp in enumerate(tqdm(n_comps, desc=f'run {run+1}')):
+    for i, n_comp in enumerate(tqdm_ctm(n_comps, tdesc(f'Noise proc run {run+1}:'))):
         # Check number of components
         if n_comp > conf.shape[1]:
             raise ValueError(f"Cannot select {n_comp} variables from conf data with {conf.shape[1]} components.")
@@ -71,10 +71,10 @@ def run_noise_processing(ddict, cfg, logger):
 
     # Compute "optimal" parameters and save to disk for inspection
     sub, ses, task = cfg['sub'], cfg['ses'], cfg['task']
-    ddict['opt_noise_alpha'] = np.zeros((len(r2s_list), ddict['preproc_func'].shape[1]))
-    ddict['opt_noise_n_comps'] = np.zeros_like(ddict['opt_noise_alpha'])
+    ddict['opt_noise_alpha'] = np.zeros((len(r2s_list), ddict['preproc_func'].shape[1]), dtype=int)
+    ddict['opt_noise_n_comps'] = np.zeros_like(ddict['opt_noise_alpha'], dtype=int)
     func_clean = ddict['preproc_func'].copy()
-    for run, r2s in enumerate(tqdm(r2s_list)):
+    for run, r2s in enumerate(tqdm_ctm(r2s_list, tdesc('Denoising funcs: '))):
         K = r2s.shape[2]  # number of voxels
         # Compute maximum r2 across n-comps/alphas
         r2s_2d = r2s.reshape((np.prod(r2s.shape[:2]), K))
@@ -85,9 +85,6 @@ def run_noise_processing(ddict, cfg, logger):
         opt_param_idx = np.c_[np.unravel_index(
             r2s_2d.argmax(axis=0), shape=r2s.shape[:2]
         )].T.astype(int)
-
-        # Set n_comps to -1 when R2 is negative (those voxels should not be denoised) 
-        opt_param_idx[0, r2_max < 0] = -1
         
         # Extract *actual* optimal parameters (not their *indices*)
         # and mask voxels R2 < 0 in opt_n_comps
@@ -112,6 +109,7 @@ def run_noise_processing(ddict, cfg, logger):
         # Start denoising!
         func, conf, _ = get_run_data(ddict, run, func_type='preproc')
         for (this_n_comps, alpha), vox_idx in yield_uniq_params(ddict, run):
+            
             X = conf[:, :this_n_comps]
             model = Ridge(alpha=alpha, fit_intercept=False)
             func[:, vox_idx] -= model.fit(X, func[:, vox_idx]).predict(X)

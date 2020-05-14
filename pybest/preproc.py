@@ -9,7 +9,7 @@ from joblib import Parallel, delayed
 from scipy.signal import savgol_filter
 from nistats.design_matrix import _cosine_drift as dct_set
 from sklearn.decomposition import PCA, FastICA
-from .utils import _load_gifti
+from .utils import _load_gifti, tqdm_ctm, tdesc
 
 
 def _run_func_parallel(ddict, cfg, run, func, logger):
@@ -59,7 +59,7 @@ def preprocess_funcs(ddict, cfg, logger):
 
     out = Parallel(n_jobs=cfg['n_cpus'])(delayed(_run_func_parallel)
         (ddict, cfg, run, func, logger)
-        for run, func in enumerate(tqdm(ddict['funcs']))
+        for run, func in enumerate(tqdm_ctm(ddict['funcs'], tdesc('Preprocessing funcs:')))
     )
 
     logger.info("Saving preprocessed data to disk")
@@ -85,11 +85,6 @@ def preprocess_funcs(ddict, cfg, logger):
     f_out = f_out.replace('bold.npy', 'mask.nii.gz')
     if ddict['mask'] is not None:
         ddict['mask'].to_filename(f_out)
-
-    logger.info(
-        f"HP-filtered/normalized func data has {data.shape[0]} timepoints "
-        f"(across {i+1} runs) and {data.shape[1]} voxels"
-    )
 
     # Store in data-dictionary (ddict)
     ddict['preproc_func'] = data
@@ -153,12 +148,8 @@ def preprocess_confs(ddict, cfg, logger):
     # Concatenate DataFrames and save
     data = pd.concat(data_, axis=0)
     f_out = op.join(out_dir, cfg['f_base'] + '_desc-preproc_conf.tsv')
-    data.to_csv(f_out, sep='\t', index=False)    
+    data.to_csv(f_out, sep='\t', index=False)
 
-    logger.info(
-        f"HP-filtered/normalized confound data has {data.shape[0]} timepoints "
-        f"(across {i+1} runs) and {data.shape[1]} components."
-    )
     ddict['preproc_conf'] = data
     return ddict
 
@@ -174,9 +165,6 @@ def preprocess_events(ddict, cfg, logger):
                 raise ValueError(f"No column '{col}' in {event}!")
 
         data = data.loc[:, to_keep]
-        n_uniq = data['trial_type'].unique().size
-        perc_unique = int(np.round((n_uniq / data.shape[0]) * 100))
-        logger.info(f"Found {n_uniq} unique trial types for run {i+1} ({perc_unique} %)")
         data['run'] = i+1
         data_.append(data)
 
@@ -187,9 +175,9 @@ def preprocess_events(ddict, cfg, logger):
             data.to_csv(f_out, sep='\t', index=False)
 
     # Adjust onsets for concatenated events file
-    for run in np.unique(ddict['run_idx']).astype(int):
-        prev_run = ddict['run_idx'] < run
-        data_[run].loc[:, 'onset'] = data_[run].loc[:, 'onset'] + prev_run.sum() * ddict['tr']
+    #for run in np.unique(ddict['run_idx']).astype(int):
+    #    prev_run = ddict['run_idx'] < run
+    #    data_[run].loc[:, 'onset'] = data_[run].loc[:, 'onset'] + prev_run.sum() * ddict['tr']
 
     data = pd.concat(data_, axis=0)
     f_out = op.join(out_dir, cfg['f_base'] + '_desc-preproc_events.tsv')

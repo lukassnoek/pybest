@@ -8,12 +8,15 @@ import nibabel as nib
 from tqdm import tqdm
 from glob import glob
 from nilearn import plotting
+from datetime import datetime
+from functools import partial
 from nilearn.datasets import fetch_surf_fsaverage
 
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)-7.7s]  %(message)s",
+    datefmt="%Y-%m-%d %H:%M",
     handlers=[
         logging.StreamHandler()
     ]
@@ -21,6 +24,12 @@ logging.basicConfig(
 
 logger = logging.getLogger('pybest')
 
+# Custom tqdm progress bar (to play nicely with the logger)
+tqdm_ctm = partial(tqdm, bar_format='{desc}  {bar}  {n_fmt}/{total_fmt}')
+
+def tdesc(s):
+    # Custom text for `desc` parameter of tqdm
+    return datetime.now().strftime('%Y-%m-%d %H:%M [INFO   ]') + f'  {s}'
 
 def check_parameters(cfg, logger):
     """ Checks parameter settings and raises errors in case of
@@ -216,10 +225,12 @@ def view_surf(file, hemi, space, fs_dir, threshold):
 
 
 def get_run_data(ddict, run, func_type='preproc'):
+    """ Get the data for a specific run. """
     t_idx = ddict['run_idx'] == run
     func = ddict[f'{func_type}_func'][t_idx, :]
     conf = ddict['preproc_conf'].loc[t_idx, :].to_numpy()
     events = ddict['preproc_events'].query("run == (@run + 1)")
+    # Not sure about the copy
     return func.copy(), conf.copy(), events.copy()
 
 
@@ -229,17 +240,17 @@ def yield_uniq_params(ddict, run):
     opt_n_comps = ddict['opt_noise_n_comps'][run, :]
     opt_alpha = ddict['opt_noise_alpha'][run, :]
     opt_params = np.vstack([opt_n_comps[np.newaxis, :], opt_alpha[np.newaxis, :]])
-    uniq_combs = np.unique(opt_params, axis=1).astype(int)
+    uniq_combs = np.unique(opt_params, axis=1)
 
     # loop over combinations
     for uix in range(uniq_combs.shape[1]):  
         these_params = uniq_combs[:, uix]
-        if these_params[0] == 0:  # r2 is negative
-            continue
-        
+        if these_params[0] == 0:
+            continue  # r2 is negative
+            
         vox_idx = np.logical_and(
             opt_n_comps == these_params[0],
             opt_alpha == these_params[1]
         )
-            
+
         yield these_params, vox_idx

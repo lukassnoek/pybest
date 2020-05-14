@@ -9,7 +9,7 @@ from .utils import find_exp_parameters, find_data
 from .preproc import preprocess_funcs, preprocess_confs, preprocess_events
 from .preproc import load_preproc_data
 from .noise_model import run_noise_processing, load_denoising_data
-from .signal_model2 import run_signal_processing
+from .signal_model import run_signal_processing
 
 
 @click.command()
@@ -67,7 +67,7 @@ def main(bids_dir, out_dir, fprep_dir, ricor_dir, subject, work_dir, start_from,
                 
                 if tr is None:
                     tr = np.round(nib.load(ddict['funcs'][0]).header['pixdim'][4], 3)
-                    logger.info(f"TR is not set; extracted TR from first func is {tr:.3f}")
+                    logger.warning(f"TR is not set; extracted TR from first func is {tr:.3f}")
 
                 # Store TR in data dict
                 ddict['tr'] = tr
