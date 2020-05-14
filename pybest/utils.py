@@ -38,6 +38,9 @@ def check_parameters(cfg, logger):
     if 'fs' in cfg['space'] and cfg['tr'] is None:
         raise ValueError("TR (--tr) needs to be set when using surface data (--space fs*)!")
 
+    if cfg['single_trial_id'] is None:
+        logger.warn(f"Empty single-trial-id; all events will be modeled as single trials!")
+        cfg['single_trial_id'] = ''
 
 def set_defaults(cfg, logger):
     """ Sets default inputs. """
@@ -230,6 +233,7 @@ def get_run_data(ddict, run, func_type='preproc'):
     func = ddict[f'{func_type}_func'][t_idx, :]
     conf = ddict['preproc_conf'].loc[t_idx, :].to_numpy()
     events = ddict['preproc_events'].query("run == (@run + 1)")
+
     # Not sure about the copy
     return func.copy(), conf.copy(), events.copy()
 

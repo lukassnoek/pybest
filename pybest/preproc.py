@@ -165,6 +165,28 @@ def preprocess_events(ddict, cfg, logger):
                 raise ValueError(f"No column '{col}' in {event}!")
 
         data = data.loc[:, to_keep]
+        # Check negative onsets
+        neg_idx = data['onset'] < 0
+        if neg_idx.sum() > 0:
+            logger.warning(f"Removing {(neg_idx > 0).sum()} event(s) with a negative onset")
+            data = data.loc[~neg_idx, :]
+        
+        # st = single trials
+        st_idx = data['trial_type'].str.contains(cfg['single_trial_id'])
+        n_st = data.loc[st_idx, :].shape[0]
+        n_unique_st = data.loc[st_idx, 'trial_type'].unique().size
+        if n_st != n_unique_st:
+            logger.warning(
+                f"Found only {n_unique_st} unique trial-types across {n_st}"
+                "single trials!"
+            )
+        
+        # Setting a unique trial-type for single trials
+        data.loc[st_idx, 'trial_type'] = [f'{str(i).zfill(3)}_{s}' for i, s in enumerate(data.loc[st_idx, 'trial_type'])]
+
+        n_other = data.loc[~st_idx, 'trial_type'].unique().size        
+        logger.info(f"Found {n_unique_st} single trials and {n_other} other conditions for run {i+1}")
+        
         data['run'] = i+1
         data_.append(data)
 

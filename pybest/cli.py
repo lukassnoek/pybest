@@ -21,7 +21,7 @@ from .signal_model import run_signal_processing
 @click.option('--work-dir', default=None, required=False)
 @click.option('--start-from', type=click.Choice(['preproc', 'noiseproc', 'signalproc']), default='preproc', required=False)
 @click.option('--session', default=None, required=False)
-@click.option('--task', default=None)
+@click.option('--task', default=None, required=False)
 @click.option('--space', default='T1w', show_default=True)
 @click.option('--hemi', type=click.Choice(['L', 'R']), default='L', show_default=True)
 @click.option('--gm-thresh', default=0.9, show_default=True)  # maybe use a "mask" option
@@ -33,10 +33,13 @@ from .signal_model import run_signal_processing
 @click.option('--n-comps', default=100, type=click.INT, show_default=True)
 @click.option('--cv-repeats', default=2, type=click.INT, show_default=True)
 @click.option('--cv-splits', default=5, type=click.INT, show_default=True)
+@click.option('--single-trial-id', default=None, type=click.STRING, show_default=True)
+@click.option('--regularize-hrf-model', is_flag=True)
 @click.option('--n-cpus', default=1, show_default=True)
 @click.option('--save-all', is_flag=True)
 def main(bids_dir, out_dir, fprep_dir, ricor_dir, subject, work_dir, start_from, session, task, space, hemi,
-         gm_thresh, slice_time_ref, high_pass_type, high_pass, tr, decomp, n_comps, cv_repeats, cv_splits, n_cpus, save_all):
+         gm_thresh, slice_time_ref, high_pass_type, high_pass, tr, decomp, n_comps, cv_repeats, cv_splits,
+         single_trial_id, n_cpus, regularize_hrf_model, save_all):
     """ Main API of pybest. """
 
     ##### set + check parameters #####
