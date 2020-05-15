@@ -9,7 +9,9 @@ from joblib import Parallel, delayed
 from scipy.signal import savgol_filter
 from nistats.design_matrix import _cosine_drift as dct_set
 from sklearn.decomposition import PCA, FastICA
-from .utils import _load_gifti, tqdm_ctm, tdesc
+
+from .logging import tqdm_ctm, tdesc
+from .utils import _load_gifti
 
 
 def _run_func_parallel(ddict, cfg, run, func, logger):
@@ -210,7 +212,7 @@ def preprocess_events(ddict, cfg, logger):
     return ddict
 
 
-def hp_filter(data, ddict, cfg, logger):
+def hp_filter(data, ddict, cfg, logger, standardize='zscore'):
     """ High-pass filter (DCT or Savitsky-Golay). """
     n_vol = data.shape[0]
     tr = ddict['tr']
@@ -220,12 +222,12 @@ def hp_filter(data, ddict, cfg, logger):
     # Create high-pass filter and clean
     if cfg['high_pass_type'] == 'dct':
         hp_set = dct_set(cfg['high_pass'], frame_times)
-        data = signal.clean(data, detrend=False, standardize='zscore', confounds=hp_set)
+        data = signal.clean(data, detrend=False, standardize=standardize, confounds=hp_set)
     else:  # savgol, hardcode polyorder
         window = int(np.round((1 / cfg['high_pass']) / tr))
-        hp_sig = savgol_filter(data, window_length=window, polyorder=2, axis=0)
-        data -= hp_sig
-        data = signal.clean(data, detrend=False, standardize='zscore')
+        data -= savgol_filter(data, window_length=window, polyorder=2, axis=0)
+        if standardize:
+            data = signal.clean(data, detrend=False, standardize=standardize)
 
     return data
 

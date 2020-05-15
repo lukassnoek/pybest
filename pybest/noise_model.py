@@ -10,9 +10,11 @@ from joblib import Parallel, delayed
 from sklearn.metrics import r2_score
 from sklearn.linear_model import Ridge
 from sklearn.model_selection import RepeatedKFold
+
+from .logging import tqdm_ctm, tdesc
 from .constants import ALPHAS
 from .models import cross_val_r2
-from .utils import get_run_data, yield_uniq_params, tqdm_ctm, tdesc
+from .utils import get_run_data, yield_uniq_params
 
 # IDEAS
 # - "smarter" way to determine optimal alpha/n_comps (better than argmax); regularize

@@ -2,34 +2,13 @@ import io
 import os
 import click
 import os.path as op
-import logging
 import numpy as np
 import nibabel as nib
 from tqdm import tqdm
 from glob import glob
 from nilearn import plotting
-from datetime import datetime
-from functools import partial
 from nilearn.datasets import fetch_surf_fsaverage
 
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)-7.7s]  %(message)s",
-    datefmt="%Y-%m-%d %H:%M",
-    handlers=[
-        logging.StreamHandler()
-    ]
-)
-
-logger = logging.getLogger('pybest')
-
-# Custom tqdm progress bar (to play nicely with the logger)
-tqdm_ctm = partial(tqdm, bar_format='{desc}  {bar}  {n_fmt}/{total_fmt}')
-
-def tdesc(s):
-    # Custom text for `desc` parameter of tqdm
-    return datetime.now().strftime('%Y-%m-%d %H:%M [INFO   ]') + f'  {s}'
 
 def check_parameters(cfg, logger):
     """ Checks parameter settings and raises errors in case of
@@ -41,6 +20,7 @@ def check_parameters(cfg, logger):
     if cfg['single_trial_id'] is None:
         logger.warn(f"Empty single-trial-id; all events will be modeled as single trials!")
         cfg['single_trial_id'] = ''
+
 
 def set_defaults(cfg, logger):
     """ Sets default inputs. """
@@ -89,7 +69,7 @@ def set_defaults(cfg, logger):
     return cfg
 
 
-def find_exp_parameters(cfg):
+def find_exp_parameters(cfg, logger):
     """ Extracts experimental parameters. """
     # Use all possible participants if not provided
     if cfg['subject'] is None:
@@ -193,6 +173,14 @@ def find_data(cfg, logger):
         funcs=funcs, confs=confs, events=events,
         ricors=ricors, gm_prob=gm_prob
     )
+
+    if cfg['tr'] is None:
+        tr = np.round(nib.load(funcs[0]).header['pixdim'][4], 3)
+        logger.warning(f"TR is not set; using TR from first func ({tr:.3f} sec.)")
+
+    # Store TR in data dict (maybe should use cfg?)
+    ddict['tr'] = tr
+
     return ddict
 
 
@@ -201,6 +189,7 @@ def _load_gifti(f):
     f_gif = nib.load(f)
     return np.vstack([arr.data for arr in f_gif.darrays])
 
+
 @click.command()
 @click.argument('file')
 @click.option('--hemi', default='L', type=click.Choice(['L', 'R']), required=False)
@@ -208,6 +197,19 @@ def _load_gifti(f):
 @click.option('--fs-dir', default=None, required=False)
 @click.option('--threshold', default=0., type=click.FLOAT, required=False)
 def view_surf(file, hemi, space, fs_dir, threshold):
+    """ Utility command to quickly view interactive surface in your browser. 
+    
+    file : str
+        Path to numpy file with vertex data
+    hemi : str
+        Hemifield; either L or R
+    space : str
+        Space of vertices (fsaverage[,5,6])
+    fs_dir : str
+        Directory with space template (mutually exclusive with `space` param)
+    threshold : float
+        Minimum value to display
+    """
     if fs_dir is not None:
         mesh = op.join(fs_dir, 'surf', f"{hemi.lower()}h.inflated")
         bg = op.join(fs_dir, 'surf', f"{hemi.lower()}h.sulc")
@@ -229,32 +231,38 @@ def view_surf(file, hemi, space, fs_dir, threshold):
 
 def get_run_data(ddict, run, func_type='preproc'):
     """ Get the data for a specific run. """
-    t_idx = ddict['run_idx'] == run
+    t_idx = ddict['run_idx'] == run  # timepoint index
     func = ddict[f'{func_type}_func'][t_idx, :]
     conf = ddict['preproc_conf'].loc[t_idx, :].to_numpy()
     events = ddict['preproc_events'].query("run == (@run + 1)")
 
-    # Not sure about the copy
+    # I think we need an explicit copy here (not sure)
     return func.copy(), conf.copy(), events.copy()
 
 
 def yield_uniq_params(ddict, run):
     """ Yields the voxel index of each unique combination of
     denoising parameters (n_comps, alpha). """
+
+    # Get run-specific parameters
     opt_n_comps = ddict['opt_noise_n_comps'][run, :]
     opt_alpha = ddict['opt_noise_alpha'][run, :]
     opt_params = np.vstack([opt_n_comps[np.newaxis, :], opt_alpha[np.newaxis, :]])
+    
+    # Find unique combinations (e.g., n_comps=10, alpha=100)
     uniq_combs = np.unique(opt_params, axis=1)
 
     # loop over combinations
     for uix in range(uniq_combs.shape[1]):  
         these_params = uniq_combs[:, uix]
         if these_params[0] == 0:
-            continue  # r2 is negative
-            
+            continue  # r2 is negative, do nothing
+
+        # Voxel index is intersection of masks            
         vox_idx = np.logical_and(
             opt_n_comps == these_params[0],
             opt_alpha == these_params[1]
         )
 
+        # yield parameters and associated voxel index
         yield these_params, vox_idx

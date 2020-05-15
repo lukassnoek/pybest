@@ -4,7 +4,8 @@ import os.path as op
 import numpy as np
 import nibabel as nib
 from glob import glob
-from .utils import logger, check_parameters, set_defaults
+from .logging import logger
+from .utils import check_parameters, set_defaults
 from .utils import find_exp_parameters, find_data
 from .preproc import preprocess_funcs, preprocess_confs, preprocess_events
 from .preproc import load_preproc_data
@@ -48,7 +49,7 @@ def main(bids_dir, out_dir, fprep_dir, ricor_dir, subject, work_dir, start_from,
     check_parameters(cfg, logger)
 
     ##### find data #####
-    cfg = find_exp_parameters(cfg)
+    cfg = find_exp_parameters(cfg, logger)
 
     ##### <start processing loop> #####
     for i, sub in enumerate(cfg['subject']):
@@ -68,18 +69,12 @@ def main(bids_dir, out_dir, fprep_dir, ricor_dir, subject, work_dir, start_from,
                 # ddict = data dictionary
                 ddict = find_data(cfg, logger)
                 
-                if tr is None:
-                    tr = np.round(nib.load(ddict['funcs'][0]).header['pixdim'][4], 3)
-                    logger.warning(f"TR is not set; extracted TR from first func is {tr:.3f}")
-
-                # Store TR in data dict
-                ddict['tr'] = tr
-
+                # Start from preproc
                 if start_from not in ['noiseproc', 'signalproc']:
                     ddict = preprocess_funcs(ddict, cfg, logger)
                     ddict = preprocess_confs(ddict, cfg, logger)                    
                     ddict = preprocess_events(ddict, cfg, logger)
-                    
+ 
                 # If we did preprocessing already ...
                 if start_from == 'noiseproc':
                     ddict = load_preproc_data(ddict, cfg)
