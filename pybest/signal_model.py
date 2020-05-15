@@ -79,9 +79,9 @@ def _run_single_trial_model(run, best_hrf_idx, out_dir, ddict, cfg, logger):
     #r2_icept_model = np.zeros(Y.shape[1])
     #r2_trial_model = np.zeros(Y.shape[1])
     
-    #st_idx = events['trial_type'].str.contains(cfg['single_trial_id'])
-    #n_st = st_idx.sum()
-    #n_cond = events.loc[~st_idx, 'trial_type'].unique().size + 1
+    st_idx = events['trial_type'].str.contains(cfg['single_trial_id'])
+    n_st = st_idx.sum()
+    n_cond = events.loc[~st_idx, 'trial_type'].unique().size + 1
     
     #st_onsets = np.round(events.loc[st_idx, 'onset'].to_numpy()).astype(int)
     #other_onsets = np.round(events.loc[~st_idx, 'onset'].to_numpy()).astype(int)
@@ -102,15 +102,13 @@ def _run_single_trial_model(run, best_hrf_idx, out_dir, ddict, cfg, logger):
     if not isinstance(X, list):
         X = [X]
 
-    #cond_betas = np.zeros((n_cond, Y.shape[1]))
-    trial_betas = np.zeros((X[0].shape[1], Y.shape[1]))
+    cond_betas = np.zeros((n_cond, Y.shape[1]))
+    trial_betas = np.zeros((n_st, Y.shape[1]))
     for hrf_idx in tqdm_ctm(np.unique(best_hrf_idx), tdesc(f'Final model run {run+1}:')):
         Xr = X[int(hrf_idx)]
         vox_idx = best_hrf_idx == hrf_idx
         nonzero = Y.sum(axis=0) != 0
         vox_idx = np.logical_and(vox_idx, nonzero)
-
-        #st_idx = X.columns.str.contains(cfg['single_trial_id'])
 
         # Fit intercept only model
         #X['intercept'] = X.loc[:, st_idx].sum(axis=1)
@@ -138,17 +136,26 @@ def _run_single_trial_model(run, best_hrf_idx, out_dir, ddict, cfg, logger):
         #preds_trial_model[:, vox_idx] = get_param_from_glm('predicted', labels, results, X_trial, time_series=True)    
         #residuals_trial_model[:, vox_idx] = get_param_from_glm('residuals', labels, results, X_trial, time_series=True)
         #r2_trial_model[vox_idx] = get_param_from_glm('r_square', labels, results, X_trial, time_series=False)
-        for i, col in enumerate(Xr.columns):
+        st_idx = Xr.columns.str.contains(cfg['single_trial_id'])
+        for i, col in enumerate(Xr.columns[st_idx]):
             cvec = np.zeros(Xr.shape[1])
             cvec[Xr.columns.tolist().index(col)] = 1
             trial_betas[i, vox_idx] = compute_contrast(labels, results, con_val=cvec, contrast_type='t').effect_size()
 
-        #D = sqrtm(np.linalg.inv(np.cov(X_trial.to_numpy().T)))
+        for i, col in enumerate(Xr.columns[~st_idx]):
+            cvec = np.zeros(Xr.shape[1])
+            cvec[Xr.columns.tolist().index(col)] = 1
+            cond_betas[i, vox_idx] = compute_contrast(labels, results, con_val=cvec, contrast_type='t').effect_size()
+        
+        #D = sqrtm(np.linalg.inv(np.cov(Xr.loc[:, st_idx].to_numpy().T)))
         #trial_betas = D @ trial_betas
 
-    #for i, name in enumerate(X_icp.columns):    
-    #    f_out = op.join(out_dir, cfg['f_base'] + f'_run-{run+1}_desc-{name}_beta.nii.gz')
-    #    masking.unmask(cond_betas[i, :], ddict['mask']).to_filename(f_out)
+    rdm = 1 - np.corrcoef(trial_betas)
+    plt.imshow(rdm)
+    plt.savefig(f'rdm_run{run+1}.png')
+    for i, name in enumerate(Xr.columns[~st_idx]):    
+        f_out = op.join(out_dir, cfg['f_base'] + f'_run-{run+1}_desc-{name}_beta.nii.gz')
+        masking.unmask(cond_betas[i, :], ddict['mask']).to_filename(f_out)
 
     f_out = op.join(out_dir, cfg['f_base'] + f'_run-{run+1}_desc-trial_beta.nii.gz')
     masking.unmask(trial_betas, ddict['mask']).to_filename(f_out)
