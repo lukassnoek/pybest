@@ -26,6 +26,7 @@ def _run_parallel(run, ddict, cfg, logger, alphas, n_comps, cv):
 
     # Find indices of timepoints belong to this run
     func, conf, _ = get_run_data(ddict, run, func_type='preproc')
+    nonzero = func.sum(axis=0) != 0  # exclude voxels w/o signal
 
     # Pre-allocate R2-scores (components x alphas x voxels)
     r2s = np.zeros((n_comps.size, alphas.size, func.shape[1]))
@@ -40,15 +41,11 @@ def _run_parallel(run, ddict, cfg, logger, alphas, n_comps, cv):
         X = conf[:, :n_comp]
 
         # Loop across different regularization params
-        # Note to self: we can use FastRidge here (pre-compute SVD)
+        # Note to self: we can use FastRidge here (pre-compute SVD)?
         for ii, alpha in enumerate(alphas):
             # Get average predictions (across cv-repeats)
             model = Ridge(alpha=alpha, fit_intercept=False)
-            r2s[i, ii, :] = cross_val_r2(model, X, func, cv)
-
-    # Set voxels without signal to 0 (otherwise it'll have an R2 of 1)
-    no_sig = func.mean(axis=0) == 0
-    r2s[:, :, no_sig] = 0
+            r2s[i, ii, nonzero] = cross_val_r2(model, X, func[:, nonzero], cv)
 
     return r2s
 
@@ -62,7 +59,8 @@ def run_noise_processing(ddict, cfg, logger):
     # Maybe add a "meta-seed" to cli options to ensure reproducibility?
     seed = np.random.randint(10e5)
     cv = RepeatedKFold(n_splits=cfg['cv_splits'], n_repeats=cfg['cv_repeats'], random_state=seed)
- 
+
+    # Uncomment line below to check how "well" it does with random confounds (= bias)
     #ddict['preproc_conf'].loc[:, :] = np.random.normal(0, 1, size=ddict['preproc_conf'].shape)
     
     # Parallel computation of R2 array (n_comps x alphas x voxels) across runs
@@ -71,18 +69,24 @@ def run_noise_processing(ddict, cfg, logger):
         for run in np.unique(ddict['run_idx'])
     )
 
-    # Compute "optimal" parameters and save to disk for inspection
     sub, ses, task = cfg['sub'], cfg['ses'], cfg['task']
+
+    # Pre-allocate parameter arrays (runs x voxels)
+    # Note to self: make sure these are ints! Otherwise yield_unique_params doesn't work
     ddict['opt_noise_alpha'] = np.zeros((len(r2s_list), ddict['preproc_func'].shape[1]), dtype=int)
     ddict['opt_noise_n_comps'] = np.zeros_like(ddict['opt_noise_alpha'], dtype=int)
+
+    # Pre-allocate clean func
     func_clean = ddict['preproc_func'].copy()
     for run, r2s in enumerate(tqdm_ctm(r2s_list, tdesc('Denoising funcs: '))):
         K = r2s.shape[2]  # number of voxels
+        
         # Compute maximum r2 across n-comps/alphas
         r2s_2d = r2s.reshape((np.prod(r2s.shape[:2]), K))
         r2_max = r2s_2d.max(axis=0)
         
         # Neat trick to do an argmax over two dims
+        # -> get optimal parameter indices
         # opt_param_idx: 2 (ncomps, alpha) x K (vox)
         opt_param_idx = np.c_[np.unravel_index(
             r2s_2d.argmax(axis=0), shape=r2s.shape[:2]
@@ -91,7 +95,7 @@ def run_noise_processing(ddict, cfg, logger):
         # Extract *actual* optimal parameters (not their *indices*)
         # and mask voxels R2 < 0 in opt_n_comps
         opt_n_comps = n_comps[opt_param_idx[0, :]]
-        opt_n_comps[r2_max < 0] = 0
+        opt_n_comps[r2_max < 0] = 0  # set negative r2 voxels to 0 comps
         opt_alpha = ALPHAS[opt_param_idx[1, :]]
         
         # Find max r2 per n-comp (for inspection)
@@ -100,27 +104,33 @@ def run_noise_processing(ddict, cfg, logger):
             r2_max_per_ncomp[i, :] = r2s[i, :, :].max(axis=0)
 
         # Extract n_comps x alpha array (timepoints are n_comps, values are alpha)
+        # for inspection
         alpha_opt_per_ncomp = np.zeros((n_comps.size, r2s.shape[2]))
         for i in range(n_comps.size):
             alpha_opt_per_ncomp[i, :] = ALPHAS[r2s[i, :, :].argmax(axis=0)]
 
-        # Save for signal processing
+        # Save (but maybe not necessary, given that denoising is done
+        # in this step, not in the signal model)
         ddict['opt_noise_alpha'][run, :] = opt_alpha
         ddict['opt_noise_n_comps'][run, :] = opt_n_comps
 
-        # Start denoising!
+        # Start denoising! Loop over unique indices
         func, conf, _ = get_run_data(ddict, run, func_type='preproc')
-        for (this_n_comps, alpha), vox_idx in yield_uniq_params(ddict, run):
-            
+        nonzero = func.sum(axis=0) != 0
+        for (this_n_comps, alpha), vox_idx in yield_uniq_params(ddict, run):            
+            # Exclude voxels without signal
+            vox_idx = np.logical_and(vox_idx, nonzero)
             X = conf[:, :this_n_comps]
+            # Refit model on all data this time and remove fitted values
             model = Ridge(alpha=alpha, fit_intercept=False)
             func[:, vox_idx] -= model.fit(X, func[:, vox_idx]).predict(X)
 
+        # Standardize once more
         func = signal.clean(func, detrend=False, standardize='zscore')
         func_clean[ddict['run_idx'] == run, :] = func
 
         # Save stuff
-        out_dir = op.join(cfg['work_dir'], f'sub-{sub}', f'ses-{ses}', 'denoising')
+        out_dir = op.join(cfg['save_dir'], 'denoising')
         if not op.isdir(out_dir):
             os.makedirs(out_dir)
 
@@ -158,9 +168,10 @@ def load_denoising_data(ddict, cfg):
     """ Loads the denoising parameters/data. """
 
     sub, ses, task = cfg['sub'], cfg['ses'], cfg['task']
-    preproc_dir = op.join(cfg['work_dir'], f'sub-{sub}', f'ses-{ses}', 'preproc')
-    denoising_dir = op.join(cfg['work_dir'], f'sub-{sub}', f'ses-{ses}', 'denoising')
+    preproc_dir = op.join(cfg['save_dir'], 'preproc')
+    denoising_dir = op.join(cfg['save_dir'], 'denoising')
 
+    print(op.join(denoising_dir, '*-opt_alpha.npy'))
     ddict['opt_noise_alpha'] = np.vstack([np.load(f) for f in sorted(glob(op.join(denoising_dir, '*-opt_alpha.npy')))]).astype(int)
     ddict['opt_noise_n_comps'] = np.vstack([np.load(f) for f in sorted(glob(op.join(denoising_dir, '*-opt_ncomps.npy')))]).astype(int)
     

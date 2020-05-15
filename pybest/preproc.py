@@ -65,7 +65,7 @@ def preprocess_funcs(ddict, cfg, logger):
     )
 
     logger.info("Saving preprocessed data to disk")
-    out_dir = op.join(cfg['out_dir'], 'preproc')
+    out_dir = op.join(cfg['save_dir'], 'preproc')
     if not op.isdir(out_dir):
         os.makedirs(out_dir)
 
@@ -141,7 +141,7 @@ def preprocess_confs(ddict, cfg, logger):
         data = pd.DataFrame(data, columns=cols)
         data_.append(data)
 
-    out_dir = op.join(cfg['out_dir'], 'preproc')
+    out_dir = op.join(cfg['save_dir'], 'preproc')
     if cfg['save_all']:
         for i, data in enumerate(data_):
             f_out = op.join(out_dir, cfg['f_base'] + f'_run-{i+1}_desc-preproc_conf.tsv')
@@ -192,7 +192,7 @@ def preprocess_events(ddict, cfg, logger):
         data['run'] = i+1
         data_.append(data)
 
-    out_dir = op.join(cfg['out_dir'], 'preproc')
+    out_dir = op.join(cfg['save_dir'], 'preproc')
     if cfg['save_all']:
         for i, data in enumerate(data_):
             f_out = op.join(out_dir, cfg['f_base'] + f'_run-{i+1}_desc-preproc_events.tsv')

@@ -11,6 +11,7 @@ from .preproc import preprocess_funcs, preprocess_confs, preprocess_events
 from .preproc import load_preproc_data
 from .noise_model import run_noise_processing, load_denoising_data
 from .signal_model import run_signal_processing
+from .constants import HRF_MODELS
 
 
 @click.command()
@@ -35,12 +36,13 @@ from .signal_model import run_signal_processing
 @click.option('--cv-repeats', default=2, type=click.INT, show_default=True)
 @click.option('--cv-splits', default=5, type=click.INT, show_default=True)
 @click.option('--single-trial-id', default=None, type=click.STRING, show_default=True)
+@click.option('--hrf-model', default='kay', type=click.Choice(HRF_MODELS), show_default=True)
 @click.option('--regularize-hrf-model', is_flag=True)
 @click.option('--n-cpus', default=1, show_default=True)
 @click.option('--save-all', is_flag=True)
 def main(bids_dir, out_dir, fprep_dir, ricor_dir, subject, work_dir, start_from, session, task, space, hemi,
          gm_thresh, slice_time_ref, high_pass_type, high_pass, tr, decomp, n_comps, cv_repeats, cv_splits,
-         single_trial_id, n_cpus, regularize_hrf_model, save_all):
+         single_trial_id, hrf_model, n_cpus, regularize_hrf_model, save_all):
     """ Main API of pybest. """
 
     ##### set + check parameters #####
@@ -59,7 +61,7 @@ def main(bids_dir, out_dir, fprep_dir, ricor_dir, subject, work_dir, start_from,
                 
                 # Some bookkeeping
                 cfg['f_base'] = f"sub-{sub}_ses-{ses}_task-{task}"
-                cfg['out_dir'] = op.join(cfg['work_dir'], f'sub-{sub}', f'ses-{ses}')
+                cfg['save_dir'] = op.join(cfg['out_dir'], f'sub-{sub}', f'ses-{ses}')
                 if not op.isdir(cfg['out_dir']):
                     os.makedirs(cfg['out_dir'])
 
