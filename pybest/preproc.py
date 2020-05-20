@@ -166,7 +166,7 @@ def preprocess_events(ddict, cfg, logger):
             if col not in data.columns:
                 raise ValueError(f"No column '{col}' in {event}!")
 
-        data = data.loc[:, to_keep]
+        #data = data.loc[:, to_keep]
         # Check negative onsets
         neg_idx = data['onset'] < 0
         if neg_idx.sum() > 0:

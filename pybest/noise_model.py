@@ -171,7 +171,6 @@ def load_denoising_data(ddict, cfg):
     preproc_dir = op.join(cfg['save_dir'], 'preproc')
     denoising_dir = op.join(cfg['save_dir'], 'denoising')
 
-    print(op.join(denoising_dir, '*-opt_alpha.npy'))
     ddict['opt_noise_alpha'] = np.vstack([np.load(f) for f in sorted(glob(op.join(denoising_dir, '*-opt_alpha.npy')))]).astype(int)
     ddict['opt_noise_n_comps'] = np.vstack([np.load(f) for f in sorted(glob(op.join(denoising_dir, '*-opt_ncomps.npy')))]).astype(int)
     

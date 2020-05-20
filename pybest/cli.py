@@ -38,11 +38,12 @@ from .constants import HRF_MODELS
 @click.option('--single-trial-id', default=None, type=click.STRING, show_default=True)
 @click.option('--hrf-model', default='kay', type=click.Choice(HRF_MODELS), show_default=True)
 @click.option('--regularize-hrf-model', is_flag=True)
+@click.option('--single-trial-model', default='lsa', type=click.Choice(['lsa', 'lss']), show_default=True)
 @click.option('--n-cpus', default=1, show_default=True)
 @click.option('--save-all', is_flag=True)
 def main(bids_dir, out_dir, fprep_dir, ricor_dir, subject, work_dir, start_from, session, task, space, hemi,
          gm_thresh, slice_time_ref, high_pass_type, high_pass, tr, decomp, n_comps, cv_repeats, cv_splits,
-         single_trial_id, hrf_model, n_cpus, regularize_hrf_model, save_all):
+         single_trial_id, hrf_model, single_trial_model, n_cpus, regularize_hrf_model, save_all):
     """ Main API of pybest. """
 
     ##### set + check parameters #####
