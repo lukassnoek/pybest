@@ -235,7 +235,7 @@ def hp_filter(data, ddict, cfg, logger, standardize='zscore'):
 def load_preproc_data(ddict, cfg):
     """ Loads preprocessed data. """
     sub, ses, task = cfg['sub'], cfg['ses'], cfg['task']
-    in_dir = op.join(cfg['work_dir'], f'sub-{sub}', f'ses-{ses}', 'preproc')
+    in_dir = op.join(cfg['save_dir'], 'preproc')
     f_base = f'sub-{sub}_ses-{ses}_task-{task}_desc-preproc_'
     
     f_in = op.join(in_dir, f_base)

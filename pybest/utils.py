@@ -21,6 +21,9 @@ def check_parameters(cfg, logger):
         logger.warn(f"Empty single-trial-id; all events will be modeled as single trials!")
         cfg['single_trial_id'] = ''
 
+    if cfg['uncorrelation'] and cfg['single_trial_model'] == 'lss':
+        raise ValueError("Cannot use uncorrelation in combination with LSS.")
+
 
 def set_defaults(cfg, logger):
     """ Sets default inputs. """
@@ -52,13 +55,6 @@ def set_defaults(cfg, logger):
     
     if cfg['ricor_dir'] is not None:
         logger.info(f"Setting RETROICOR directory to {cfg['ricor_dir']}")
-
-    if cfg['work_dir'] is None:
-        cfg['work_dir'] = op.join(cfg['out_dir'], 'work')
-        if not op.isdir(cfg['work_dir']):
-            os.makedirs(cfg['work_dir'])
-
-        logger.info(f"Setting working directory to {cfg['work_dir']}")
 
     if cfg['gm_thresh'] == 0:
         cfg['gm_thresh'] = None
@@ -238,31 +234,3 @@ def get_run_data(ddict, run, func_type='preproc'):
 
     # I think we need an explicit copy here (not sure)
     return func.copy(), conf.copy(), events.copy()
-
-
-def yield_uniq_params(ddict, run):
-    """ Yields the voxel index of each unique combination of
-    denoising parameters (n_comps, alpha). """
-
-    # Get run-specific parameters
-    opt_n_comps = ddict['opt_noise_n_comps'][run, :]
-    opt_alpha = ddict['opt_noise_alpha'][run, :]
-    opt_params = np.vstack([opt_n_comps[np.newaxis, :], opt_alpha[np.newaxis, :]])
-    
-    # Find unique combinations (e.g., n_comps=10, alpha=100)
-    uniq_combs = np.unique(opt_params, axis=1)
-
-    # loop over combinations
-    for uix in range(uniq_combs.shape[1]):  
-        these_params = uniq_combs[:, uix]
-        if these_params[0] == 0:
-            continue  # r2 is negative, do nothing
-
-        # Voxel index is intersection of masks            
-        vox_idx = np.logical_and(
-            opt_n_comps == these_params[0],
-            opt_alpha == these_params[1]
-        )
-
-        # yield parameters and associated voxel index
-        yield these_params, vox_idx

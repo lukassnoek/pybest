@@ -1,29 +1,24 @@
-import warnings
 import os
-import os.path as op
-import pandas as pd
-import numpy as np
 import matplotlib
+import os.path as op
+import numpy as np
+import pandas as pd
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
-from tqdm import tqdm
+
+from nilearn import masking
 from joblib import Parallel, delayed
+from scipy.linalg import sqrtm
 from scipy.interpolate import interp1d
-from nilearn import signal, masking
-from sklearn.linear_model import Ridge
 from nistats.first_level_model import run_glm
+from nistats.contrasts import compute_contrast
 from nistats.experimental_paradigm import check_events
 from nistats.design_matrix import make_first_level_design_matrix
-from nistats.reporting import plot_design_matrix
 from nistats.hemodynamic_models import _sample_condition, _resample_regressor
-from nistats.reporting import plot_design_matrix
-from nistats.contrasts import compute_contrast
-from scipy.linalg import sqrtm
 
 from .preproc import hp_filter
 from .logging import tqdm_ctm, tdesc
-from .utils import get_run_data, yield_uniq_params
-
+from .utils import get_run_data
 
 here = op.dirname(__file__)
 HRFS = pd.read_csv(op.join(here, 'data', 'hrf_ts.tsv'), sep='\t', index_col=0)
@@ -83,6 +78,7 @@ def _run_single_trial_model(run, best_hrf_idx, out_dir, ddict, cfg, logger):
 
         if cfg['single_trial_model'] == 'lsa':
             X = create_design_matrix(ddict['tr'], ft, events, hrf_model=cfg['hrf_model'], hrf_idx=hrf_idx)
+            #X.loc[:, :] = hp_filter(X.to_numpy(), ddict, cfg, logger, standardize='zscore')
             labels, results = run_glm(Y[:, vox_idx], X.to_numpy(), noise_model='ols')
             residuals[:, vox_idx] = get_param_from_glm('residuals', labels, results, X, time_series=True)
             preds[:, vox_idx] = get_param_from_glm('predicted', labels, results, X, time_series=True)
@@ -91,6 +87,13 @@ def _run_single_trial_model(run, best_hrf_idx, out_dir, ddict, cfg, logger):
                 cvec = np.zeros(X.shape[1])
                 cvec[X.columns.tolist().index(col)] = 1
                 st_betas[i, vox_idx] = compute_contrast(labels, results, con_val=cvec, contrast_type='t').effect_size()
+
+            # uncorrelation (whiten patterns with covariance of design)
+            # https://www.sciencedirect.com/science/article/pii/S1053811919310407
+            if cfg['uncorrelation']:
+                X_st = X.loc[:, X.columns.str.contains(cfg['single_trial_id'])].to_numpy()
+                D = sqrtm(np.cov(X_st.T))
+                st_betas = D @ st_betas
 
             for i, col in enumerate(cond_names):
                 cvec = np.zeros(X.shape[1])
@@ -123,13 +126,9 @@ def _run_single_trial_model(run, best_hrf_idx, out_dir, ddict, cfg, logger):
             cond_betas /= st_names.size
             residuals /= st_names.size
      
-        # uncorrelation
-        #D = sqrtm(np.linalg.inv(np.cov(Xr.loc[:, st_idx].to_numpy().T)))
-        #trial_betas = D @ trial_betas
-
-    #rdm = 1 - np.corrcoef(st_betas)
-    #plt.imshow(rdm)
-    #plt.savefig(f"rdm_run{run+1}_model-{cfg['hrf_model'].replace(' ', '')}_type-{cfg['single_trial_model']}.png")
+    rdm = 1 - np.corrcoef(st_betas)
+    plt.imshow(rdm)
+    plt.savefig(f"rdm_run{run+1}_model-{cfg['hrf_model'].replace(' ', '')}_type-{cfg['single_trial_model']}.png")
     for i, name in enumerate(cond_names):    
         f_out = op.join(out_dir, cfg['f_base'] + f'_run-{run+1}_desc-{name}_beta.nii.gz')
         masking.unmask(cond_betas[i, :], ddict['mask']).to_filename(f_out)

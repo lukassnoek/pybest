@@ -20,7 +20,6 @@ from .constants import HRF_MODELS
 @click.argument('fprep_dir', default=None, required=False)
 @click.argument('ricor_dir', default=None, required=False)
 @click.argument('subject', nargs=-1, required=False)
-@click.option('--work-dir', default=None, required=False)
 @click.option('--start-from', type=click.Choice(['preproc', 'noiseproc', 'signalproc']), default='preproc', required=False)
 @click.option('--session', default=None, required=False)
 @click.option('--task', default=None, required=False)
@@ -39,11 +38,12 @@ from .constants import HRF_MODELS
 @click.option('--hrf-model', default='kay', type=click.Choice(HRF_MODELS), show_default=True)
 @click.option('--regularize-hrf-model', is_flag=True)
 @click.option('--single-trial-model', default='lsa', type=click.Choice(['lsa', 'lss']), show_default=True)
+@click.option('--uncorrelation', is_flag=True)
 @click.option('--n-cpus', default=1, show_default=True)
 @click.option('--save-all', is_flag=True)
-def main(bids_dir, out_dir, fprep_dir, ricor_dir, subject, work_dir, start_from, session, task, space, hemi,
+def main(bids_dir, out_dir, fprep_dir, ricor_dir, subject, start_from, session, task, space, hemi,
          gm_thresh, slice_time_ref, high_pass_type, high_pass, tr, decomp, n_comps, cv_repeats, cv_splits,
-         single_trial_id, hrf_model, single_trial_model, n_cpus, regularize_hrf_model, save_all):
+         single_trial_id, hrf_model, regularize_hrf_model, single_trial_model, uncorrelation, n_cpus, save_all):
     """ Main API of pybest. """
 
     ##### set + check parameters #####
