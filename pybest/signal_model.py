@@ -23,12 +23,12 @@ from .utils import get_run_data
 
 here = op.dirname(__file__)
 HRFS = pd.read_csv(op.join(here, 'data', 'hrf_ts.tsv'), sep='\t', index_col=0)
-
+#HRFS = HRFS / HRFS.max(axis=0)
 
 def _optimize_hrf(run, ddict, cfg, logger):
     """ Tries out 20 different Kay HRFs for a given run. """
     Y, _, events = get_run_data(ddict, run, func_type='denoised')
-    nonzero = Y.sum(axis=0) != 0
+    nonzero = ~np.all(np.isclose(Y, 0.), axis=0)
 
     # Create 20 different design matrices
     ft = get_frame_times(ddict, cfg, Y)    
@@ -49,7 +49,7 @@ def _run_single_trial_model(run, best_hrf_idx, out_dir, ddict, cfg, logger):
     """ Fits a single trial model, possibly using an optimized HRF. """
     Y, conf, events = get_run_data(ddict, run, func_type='denoised')
     ft = get_frame_times(ddict, cfg, Y)
-    nonzero = Y.sum(axis=0) != 0
+    nonzero = ~np.all(np.isclose(Y, 0.), axis=0)
 
     # Which events are single trials (st)?
     st_idx = events['trial_type'].str.contains(cfg['single_trial_id'])
@@ -91,12 +91,12 @@ def _run_single_trial_model(run, best_hrf_idx, out_dir, ddict, cfg, logger):
 
                 # Find voxels that correspond to this_n_comps
                 this_vox_idx = opt_n_comps == this_n_comps
-                # Exclude voxels without signal
                 this_vox_idx = np.logical_and(vox_idx, this_vox_idx)
                 
                 X_n = conf[:, :this_n_comps]
                 this_X.iloc[:, :] = this_X.to_numpy() - model.fit(X_n, this_X.to_numpy()).predict(X_n)
-
+                this_X.iloc[:, :-1] = this_X.iloc[:, :-1] / this_X.iloc[:, :-1].max(axis=0)
+                
                 # Refit model on all data this time and remove fitted values
                 labels, results = run_glm(Y[:, this_vox_idx], this_X.to_numpy(), noise_model=cfg['single_trial_noise_model'])
                 residuals[:, this_vox_idx] = get_param_from_glm('residuals', labels, results, this_X, time_series=True)
@@ -146,7 +146,8 @@ def _run_single_trial_model(run, best_hrf_idx, out_dir, ddict, cfg, logger):
                     
                     X_n = conf[:, :this_n_comps]
                     this_X.iloc[:, :] = this_X.to_numpy() - model.fit(X_n, this_X.to_numpy()).predict(X_n)
-
+                    this_X.iloc[:, :-1] = this_X.iloc[:, :-1] / this_X.iloc[:, :-1].max(axis=0)
+                
                     # Run GLM and compute contrast for this single trial and other conditions
                     labels, results = run_glm(Y[:, this_vox_idx], this_X.to_numpy(), noise_model=cfg['single_trial_noise_model'])
                     residuals[:, this_vox_idx] += get_param_from_glm('residuals', labels, results, this_X, time_series=True)
@@ -180,6 +181,7 @@ def _run_single_trial_model(run, best_hrf_idx, out_dir, ddict, cfg, logger):
     rdm = 1 - np.corrcoef(st_betas)
     plt.imshow(rdm)
     plt.savefig(f"rdm_run{run+1}_model-{cfg['hrf_model'].replace(' ', '')}_type-{cfg['single_trial_model']}.png")
+    plt.close()
     for i, name in enumerate(cond_names):    
         f_out = op.join(out_dir, cfg['f_base'] + f'_run-{run+1}_desc-{name}_beta.nii.gz')
         masking.unmask(cond_betas[i, :], ddict['mask']).to_filename(f_out)
@@ -208,6 +210,7 @@ def run_signal_processing(ddict, cfg, logger):
     
     if cfg['hrf_model'] == 'kay':  # try to optimize HRF selection
         # First, get R2 values for each HRF-based model (20 in total)
+        
         r2 = Parallel(n_jobs=cfg['n_cpus'])(delayed(_optimize_hrf)
             (run, ddict, cfg, logger) for run in np.unique(ddict['run_idx'])
         )
@@ -233,11 +236,13 @@ def run_signal_processing(ddict, cfg, logger):
                 f_out = op.join(out_dir, cfg['f_base'] + '_desc-hrf_index.nii.gz')
                 masking.unmask(best_hrf_idx, ddict['mask']).to_filename(f_out)
         else:  # specific HRF for each voxel and run (overfitting to the maxxxxx)
-            best_hrf_idx = r2.argmax(axis=1)
+            best_hrf_idx = r2.argmax(axis=1).astype(int)
     else:
         # bit of a hack
-        best_hrf_idx = np.zeros(ddict['denoised_func'].shape[1])
-
+        best_hrf_idx = np.zeros(ddict['denoised_func'].shape[1]).astype(int)
+    
+    #best_hrf_idx = np.random.randint(20, size=ddict['denoised_func'].shape[1])
+    
     # Now, fit the single-trial models for real, using a voxel- (and possibly run-)
     # specific HRF or using a "fixed" one (if not regularize_hrf_model)
     Parallel(n_jobs=cfg['n_cpus'])(delayed(_run_single_trial_model)
@@ -286,10 +291,12 @@ def create_design_matrix(tr, frame_times, events, hrf_model='kay', hrf_idx=None)
         t_hrf = HRFS.index.copy()
 
         # Resample to msec resolution
-        f = interp1d(t_hrf, HRFS, axis=0)
         t_high = np.linspace(0, 50, num=HRFS.shape[0]*hrf_oversampling, endpoint=True)
-        hrfs_hr = f(t_high).T  # hr = high resolution
-
+        hrfs_hr = np.zeros((t_high.size, 20))
+        for i in range(20):  # should be able to do this w/o for loop, but lazy
+            f = interp1d(t_hrf, HRFS.iloc[:, i].to_numpy())
+            hrfs_hr[:, i] = f(t_high)  # hr = high resolution
+        
         if hrf_idx is None:
             to_iter = range(HRFS.shape[1])
         else:
@@ -324,7 +331,10 @@ def create_design_matrix(tr, frame_times, events, hrf_model='kay', hrf_idx=None)
                 X[:, i] = f(frame_times).T
             
             # Store in dms
-            dms.append(pd.DataFrame(X, columns=uniq_trial_types, index=frame_times))
+            X /= X.max(axis=0)
+            dm = pd.DataFrame(X, columns=uniq_trial_types, index=frame_times)
+            dm['constant'] = 1
+            dms.append(dm)
 
         if len(dms) == 1:
             dms = dms[0]
