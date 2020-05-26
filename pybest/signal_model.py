@@ -17,13 +17,11 @@ from nistats.experimental_paradigm import check_events
 from nistats.design_matrix import make_first_level_design_matrix
 from nistats.hemodynamic_models import _sample_condition, _resample_regressor
 
+from .constants import HRFS_HR
 from .preproc import hp_filter
 from .logging import tqdm_ctm, tdesc
 from .utils import get_run_data
 
-here = op.dirname(__file__)
-HRFS = pd.read_csv(op.join(here, 'data', 'hrf_ts.tsv'), sep='\t', index_col=0)
-#HRFS = HRFS / HRFS.max(axis=0)
 
 def _optimize_hrf(run, ddict, cfg, logger):
     """ Tries out 20 different Kay HRFs for a given run. """
@@ -77,8 +75,9 @@ def _run_single_trial_model(run, best_hrf_idx, out_dir, ddict, cfg, logger):
 
         if cfg['single_trial_model'] == 'lsa':
             X = create_design_matrix(ddict['tr'], ft, events, hrf_model=cfg['hrf_model'], hrf_idx=hrf_idx)
-            st_idx_x = X.columns.str.contains(cfg['single_trial_id'])
-            
+            X.iloc[:, :-1] = hp_filter(X.iloc[:, :-1].to_numpy(), ddict, cfg, logger)
+
+            st_idx_x = X.columns.str.contains(cfg['single_trial_id'])            
             model = LinearRegression(fit_intercept=False)
             for this_n_comps in np.unique(ddict['opt_noise_n_comps'][run, :]):
                 # If n_comps is 0, then R2 was negative and we
@@ -86,14 +85,12 @@ def _run_single_trial_model(run, best_hrf_idx, out_dir, ddict, cfg, logger):
                 if this_n_comps == 0:
                     continue
 
-                this_X = X.copy()
-                this_X.iloc[:, :-1] = hp_filter(this_X.iloc[:, :-1].to_numpy(), ddict, cfg, logger)
-
                 # Find voxels that correspond to this_n_comps
                 this_vox_idx = opt_n_comps == this_n_comps
                 this_vox_idx = np.logical_and(vox_idx, this_vox_idx)
                 
                 X_n = conf[:, :this_n_comps]
+                this_X = X.copy()
                 this_X.iloc[:, :] = this_X.to_numpy() - model.fit(X_n, this_X.to_numpy()).predict(X_n)
                 this_X.iloc[:, :-1] = this_X.iloc[:, :-1] / this_X.iloc[:, :-1].max(axis=0)
                 
@@ -274,11 +271,10 @@ def create_design_matrix(tr, frame_times, events, hrf_model='kay', hrf_idx=None)
     """ Creates a design matrix based on a HRF from Kendrick Kay's set
     or a default one from Nistats. """
     
-    # Always oversample to milliseconds
-    hrf_oversampling = 10
     # This is to keep oversampling consistent across hrf_models
+    hrf_oversampling = 10
     design_oversampling = tr / (0.1 / hrf_oversampling)
-    
+
     if hrf_model != 'kay':
         return make_first_level_design_matrix(
             frame_times, events, drift_model=None, min_onset=0,
@@ -286,26 +282,16 @@ def create_design_matrix(tr, frame_times, events, hrf_model='kay', hrf_idx=None)
         )
 
     if hrf_model == 'kay':
-
-        # Note: Kendrick's HRFs are defined at 0.1 sec resolution
-        t_hrf = HRFS.index.copy()
-
-        # Resample to msec resolution
-        t_high = np.linspace(0, 50, num=HRFS.shape[0]*hrf_oversampling, endpoint=True)
-        hrfs_hr = np.zeros((t_high.size, 20))
-        for i in range(20):  # should be able to do this w/o for loop, but lazy
-            f = interp1d(t_hrf, HRFS.iloc[:, i].to_numpy())
-            hrfs_hr[:, i] = f(t_high)  # hr = high resolution
         
         if hrf_idx is None:
-            to_iter = range(HRFS.shape[1])
+            to_iter = range(HRFS_HR.shape[1])
         else:
             to_iter = [hrf_idx]
 
         # dms will store all design matrices
         dms = []
         for hrf_idx in to_iter:
-            hrf = hrfs_hr[:, hrf_idx]
+            hrf = HRFS_HR[:, hrf_idx]
             
             # To match the design oversampling, do it relative to tr
             trial_type, onset, duration, modulation = check_events(events)
@@ -331,7 +317,7 @@ def create_design_matrix(tr, frame_times, events, hrf_model='kay', hrf_idx=None)
                 X[:, i] = f(frame_times).T
             
             # Store in dms
-            X /= X.max(axis=0)
+            X /= X.max(axis=0)  # rescale to max = 1
             dm = pd.DataFrame(X, columns=uniq_trial_types, index=frame_times)
             dm['constant'] = 1
             dms.append(dm)

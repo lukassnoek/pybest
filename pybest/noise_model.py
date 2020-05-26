@@ -23,8 +23,8 @@ def _run_parallel(run, ddict, cfg, logger, n_comps, cv):
 
     # Find indices of timepoints belong to this run
     func, conf, _ = get_run_data(ddict, run, func_type='preproc')
-    nonzero = func.sum(axis=0) != 0  # exclude voxels w/o signal
-
+    nonzero = ~np.all(np.isclose(func, 0.), axis=0)
+    
     # Pre-allocate R2-scores (components x voxels)
     r2s = np.zeros((n_comps.size, func.shape[1]))
 
@@ -64,7 +64,7 @@ def run_noise_processing(ddict, cfg, logger):
     sub, ses, task = cfg['sub'], cfg['ses'], cfg['task']
 
     # Pre-allocate parameter array (runs x voxels)
-    # Note to self: make sure these are ints! Otherwise yield_unique_params doesn't work
+    # Note to self: make sure these are ints! == with floats doesn't work well
     ddict['opt_noise_n_comps'] = np.zeros((len(r2s_list), ddict['preproc_func'].shape[1]), dtype=int)
 
     # Pre-allocate clean func
@@ -143,7 +143,6 @@ def load_denoising_data(ddict, cfg):
     denoising_dir = op.join(cfg['save_dir'], 'denoising')
 
     ddict['opt_noise_n_comps'] = np.vstack([np.load(f) for f in sorted(glob(op.join(denoising_dir, '*-opt_ncomps.npy')))]).astype(int)
-    
     ddict['denoised_func'] = np.load(op.join(denoising_dir, f'sub-{sub}_ses-{ses}_task-{task}_desc-denoised_bold.npy'))
     ddict['preproc_conf'] = pd.read_csv(op.join(preproc_dir, f'sub-{sub}_ses-{ses}_task-{task}_desc-preproc_conf.tsv'), sep='\t')
     ddict['preproc_events'] = pd.read_csv(op.join(preproc_dir, f'sub-{sub}_ses-{ses}_task-{task}_desc-preproc_events.tsv'), sep='\t')
@@ -155,5 +154,3 @@ def load_denoising_data(ddict, cfg):
     ddict['run_idx'] = np.load(op.join(preproc_dir, 'run_idx.npy'))
 
     return ddict
-
-    
