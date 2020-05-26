@@ -24,6 +24,9 @@ def check_parameters(cfg, logger):
     if cfg['uncorrelation'] and cfg['single_trial_model'] == 'lss':
         raise ValueError("Cannot use uncorrelation in combination with LSS.")
 
+    if cfg['remove_st_intercept'] and cfg['single_trial_model'] == 'lss':
+        raise ValueError("Cannot remove stim intercept in combination with LSS.")
+
 
 def set_defaults(cfg, logger):
     """ Sets default inputs. """
