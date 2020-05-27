@@ -39,13 +39,14 @@ from .constants import HRF_MODELS
 @click.option('--single-trial-noise-model', default='ols', type=click.Choice(['ols', 'ar1']), show_default=True)
 @click.option('--regularize-hrf-model', is_flag=True)
 @click.option('--single-trial-model', default='lsa', type=click.Choice(['lsa', 'lss']), show_default=True)
-@click.option('--remove-st-intercept', is_flag=True)
+@click.option('--pattern-units', default='beta', type=click.Choice(['beta', 'zscore']), show_default=True)
 @click.option('--uncorrelation', is_flag=True)
 @click.option('--n-cpus', default=1, show_default=True)
 @click.option('--save-all', is_flag=True)
 def main(bids_dir, out_dir, fprep_dir, ricor_dir, subject, start_from, session, task, space, hemi,
          gm_thresh, slice_time_ref, high_pass_type, high_pass, tr, decomp, n_comps, cv_repeats, cv_splits,
-         single_trial_id, hrf_model, single_trial_noise_model, regularize_hrf_model, single_trial_model, remove_st_intercept, uncorrelation, n_cpus, save_all):
+         single_trial_id, hrf_model, single_trial_noise_model, regularize_hrf_model, single_trial_model, pattern_units,
+         uncorrelation, n_cpus, save_all):
     """ Main API of pybest. """
 
     ##### set + check parameters #####

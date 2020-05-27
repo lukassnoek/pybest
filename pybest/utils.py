@@ -6,8 +6,10 @@ import numpy as np
 import nibabel as nib
 from tqdm import tqdm
 from glob import glob
-from nilearn import plotting
+from nistats.first_level_model import run_glm
+from nilearn import plotting, signal
 from nilearn.datasets import fetch_surf_fsaverage
+from sklearn.linear_model import LinearRegression
 
 
 def check_parameters(cfg, logger):
@@ -23,9 +25,6 @@ def check_parameters(cfg, logger):
 
     if cfg['uncorrelation'] and cfg['single_trial_model'] == 'lss':
         raise ValueError("Cannot use uncorrelation in combination with LSS.")
-
-    if cfg['remove_st_intercept'] and cfg['single_trial_model'] == 'lss':
-        raise ValueError("Cannot remove stim intercept in combination with LSS.")
 
 
 def set_defaults(cfg, logger):
@@ -189,6 +188,33 @@ def _load_gifti(f):
     return np.vstack([arr.data for arr in f_gif.darrays])
 
 
+def get_frame_times(ddict, cfg, Y):
+    """ Computes frame times for a particular time series (and TR). """
+    tr = ddict['tr']
+    n_vol = Y.shape[0]
+    st_ref = cfg['slice_time_ref']
+    ft = np.linspace(st_ref * tr, n_vol * tr + st_ref * tr, n_vol, endpoint=False)
+    return ft
+  
+
+def get_param_from_glm(name, labels, results, dm, time_series=False, predictors=False):
+    """ Get parameters from a fitted nistats GLM. """
+    if predictors and time_series:
+        raise ValueError("Cannot get predictors and time series.")
+
+    if time_series:
+        data = np.zeros((dm.shape[0], labels.size))
+    elif predictors:
+        data = np.zeros((dm.shape[1], labels.size))
+    else:
+        data = np.zeros_like(labels)
+
+    for lab in np.unique(labels):
+        data[..., labels == lab] = getattr(results[lab], name)
+    
+    return data
+
+
 @click.command()
 @click.argument('file')
 @click.option('--hemi', default='L', type=click.Choice(['L', 'R']), required=False)
@@ -237,3 +263,30 @@ def get_run_data(ddict, run, func_type='preproc'):
 
     # I think we need an explicit copy here (not sure)
     return func.copy(), conf.copy(), events.copy()
+
+
+def yield_glm_results(vox_idx, Y, X, conf, run, ddict, cfg, noise_model='ols'):
+    model = LinearRegression(fit_intercept=False)
+    opt_n_comps = ddict['opt_noise_n_comps'][run, :]
+    for this_n_comps in np.unique(opt_n_comps):  # loop across unique n comps
+        # If n_comps is 0, then R2 was negative and we
+        # don't want to denoise, so continue
+        if this_n_comps == 0:
+            continue
+
+        # Find voxels that correspond to this_n_comps and intersect
+        # with given voxel index
+        this_vox_idx = opt_n_comps == this_n_comps
+        this_vox_idx = np.logical_and(vox_idx, this_vox_idx)
+        
+        # Get confound matrix (X_n) and remove from design (this_X)
+        X_n = conf[:, :this_n_comps]
+        this_X = X.copy()
+        this_X.iloc[:, :] = this_X.to_numpy() - model.fit(X_n, this_X.to_numpy()).predict(X_n)
+        
+        # Set max to 1 (not sure whether I should actually do this)
+        this_X.iloc[:, :-1] = this_X.iloc[:, :-1] / this_X.iloc[:, :-1].max(axis=0)
+        
+        # Refit model on all data this time and remove fitted values
+        labels, results = run_glm(Y[:, this_vox_idx], this_X.to_numpy(), noise_model=noise_model)
+        yield this_vox_idx, this_X, labels, results

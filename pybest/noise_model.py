@@ -83,7 +83,7 @@ def run_noise_processing(ddict, cfg, logger):
 
         # Start denoising! Loop over unique indices
         func, conf, _ = get_run_data(ddict, run, func_type='preproc')
-        nonzero = func.sum(axis=0) != 0
+        nonzero = ~np.all(np.isclose(func, 0.), axis=0)
         model = LinearRegression(fit_intercept=False)
         for this_n_comps in np.unique(opt_n_comps):
             # If n_comps is 0, then R2 was negative and we

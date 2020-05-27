@@ -10,6 +10,7 @@ from nilearn import masking
 from joblib import Parallel, delayed
 from scipy.linalg import sqrtm
 from scipy.interpolate import interp1d
+from scipy.stats.mstats import rankdata
 from sklearn.linear_model import LinearRegression
 from nistats.first_level_model import run_glm
 from nistats.contrasts import compute_contrast
@@ -20,12 +21,15 @@ from nistats.hemodynamic_models import _sample_condition, _resample_regressor
 from .constants import HRFS_HR
 from .preproc import hp_filter
 from .logging import tqdm_ctm, tdesc
-from .utils import get_run_data
+from .utils import get_run_data, get_frame_times, get_param_from_glm, yield_glm_results
+
+
+STATS = dict(beta='effect_size', zscore='z_score')
 
 
 def _optimize_hrf(run, ddict, cfg, logger):
     """ Tries out 20 different Kay HRFs for a given run. """
-    Y, _, events = get_run_data(ddict, run, func_type='denoised')
+    Y, conf, events = get_run_data(ddict, run, func_type='denoised')
     nonzero = ~np.all(np.isclose(Y, 0.), axis=0)
 
     # Create 20 different design matrices
@@ -33,13 +37,15 @@ def _optimize_hrf(run, ddict, cfg, logger):
     dms = create_design_matrix(ddict['tr'], ft, events, hrf_model=cfg['hrf_model'])
     
     # Pre-allocate R2 array: 20 (hrfs) x K (voxels)
-    r2 = np.zeros((HRFS.shape[1], Y.shape[1]))
+    r2 = np.zeros((20, Y.shape[1]))
     for i, X in enumerate(tqdm_ctm(dms, tdesc(f'Optimizing run {run+1}:'))):
-        # Run GLM on nonzero voxels with current design matrix (always OLS, otherwise)
-        # it takes ages
-        labels, results = run_glm(Y[:, nonzero], X.to_numpy(), noise_model='ols')
-        r2[i, nonzero] = get_param_from_glm('r_square', labels, results, X, time_series=False)
-                
+        # High-pass design matrix (except intercept) and remove noise
+        X.iloc[:, :-1] = hp_filter(X.iloc[:, :-1].to_numpy(), ddict, cfg, logger)
+
+        for this_vox_idx, _, labels, results in yield_glm_results(nonzero, Y, X, conf, run, ddict, cfg, noise_model='ols'):
+            r2[i, this_vox_idx] = get_param_from_glm('r_square', labels, results, X, time_series=False)
+
+    r2 = rankdata(r2, axis=0)
     return r2
 
 
@@ -60,42 +66,26 @@ def _run_single_trial_model(run, best_hrf_idx, out_dir, ddict, cfg, logger):
     # Pre-allocate residuals and r2
     residuals = np.zeros(Y.shape)
     r2 = np.zeros(Y.shape[1])
-    betas = np.zeros((events['trial_type'].unique().size + 1, Y.shape[1]))
+    patterns = np.zeros((events['trial_type'].unique().size + 1, Y.shape[1]))
 
     if cfg['single_trial_model'] == 'lsa':
         preds = np.zeros(Y.shape)
-        st_icept_betas = np.zeros(Y.shape[1])
+        st_icept = np.zeros(Y.shape[1])
     
-    opt_n_comps = ddict['opt_noise_n_comps'][run, :]
     # Loop over unique HRF indices (0-20 probably)
     for hrf_idx in tqdm_ctm(np.unique(best_hrf_idx), tdesc(f'Final model run {run+1}:')):
         # Create voxel mask (nonzero ^ hrf index)
         vox_idx = best_hrf_idx == hrf_idx
         vox_idx = np.logical_and(vox_idx, nonzero)
-
         if cfg['single_trial_model'] == 'lsa':
+            # Get current design matrix, hp-filter, and start noise loop
             X = create_design_matrix(ddict['tr'], ft, events, hrf_model=cfg['hrf_model'], hrf_idx=hrf_idx)
             X.iloc[:, :-1] = hp_filter(X.iloc[:, :-1].to_numpy(), ddict, cfg, logger)
+            st_idx_x = X.columns.str.contains(cfg['single_trial_id'])
 
-            st_idx_x = X.columns.str.contains(cfg['single_trial_id'])            
-            model = LinearRegression(fit_intercept=False)
-            for this_n_comps in np.unique(ddict['opt_noise_n_comps'][run, :]):
-                # If n_comps is 0, then R2 was negative and we
-                # don't want to denoise, so continue
-                if this_n_comps == 0:
-                    continue
-
-                # Find voxels that correspond to this_n_comps
-                this_vox_idx = opt_n_comps == this_n_comps
-                this_vox_idx = np.logical_and(vox_idx, this_vox_idx)
-                
-                X_n = conf[:, :this_n_comps]
-                this_X = X.copy()
-                this_X.iloc[:, :] = this_X.to_numpy() - model.fit(X_n, this_X.to_numpy()).predict(X_n)
-                this_X.iloc[:, :-1] = this_X.iloc[:, :-1] / this_X.iloc[:, :-1].max(axis=0)
-                
-                # Refit model on all data this time and remove fitted values
-                labels, results = run_glm(Y[:, this_vox_idx], this_X.to_numpy(), noise_model=cfg['single_trial_noise_model'])
+            # Loop across unique n comps
+            for this_vox_idx, this_X, labels, results in yield_glm_results(vox_idx, Y, X, conf, run, ddict, cfg, noise_model=cfg['single_trial_noise_model']):                
+                # Extract residuals, predictions, and r2
                 residuals[:, this_vox_idx] = get_param_from_glm('residuals', labels, results, this_X, time_series=True)
                 preds[:, this_vox_idx] = get_param_from_glm('predicted', labels, results, this_X, time_series=True)
                 r2[this_vox_idx] = get_param_from_glm('r_square', labels, results, this_X, time_series=False)
@@ -103,20 +93,21 @@ def _run_single_trial_model(run, best_hrf_idx, out_dir, ddict, cfg, logger):
                 for i, col in enumerate(this_X.columns):
                     cvec = np.zeros(this_X.shape[1])
                     cvec[this_X.columns.tolist().index(col)] = 1
-                    betas[i, this_vox_idx] = compute_contrast(labels, results, con_val=cvec, contrast_type='t').effect_size()
+                    con = compute_contrast(labels, results, con_val=cvec, contrast_type='t')
+                    patterns[i, this_vox_idx] = getattr(con, STATS[cfg['pattern_units']])()
 
                 cvec = np.zeros(this_X.shape[1])
                 cvec[st_idx_x] = 1
-                st_icept_betas[this_vox_idx] = compute_contrast(labels, results, con_val=cvec, contrast_type='t').effect_size()
-        
+                con = compute_contrast(labels, results, con_val=cvec, contrast_type='t')
+                st_icept[this_vox_idx] = getattr(con, STATS[cfg['pattern_units']])()
+
                 # uncorrelation (whiten patterns with covariance of design)
                 # https://www.sciencedirect.com/science/article/pii/S1053811919310407
                 if cfg['uncorrelation']:
                     X_ = this_X.iloc[:, :-1].to_numpy()
                     D = sqrtm(np.cov(X_.T))
                     # Do not uncorrelate constant
-                    betas[:-1, this_vox_idx] = D @ betas[:-1, this_vox_idx]
-                
+                    patterns[:-1, this_vox_idx] = D @ patterns[:-1, this_vox_idx]
         else:  # If not LSA, do LSS
             # Loop over single-trials
             for trial_nr, st_name in enumerate(st_names):
@@ -125,66 +116,48 @@ def _run_single_trial_model(run, best_hrf_idx, out_dir, ddict, cfg, logger):
                 events_cp.loc[events_cp['trial_type'] == st_name, 'trial_type'] = 'X'
                 events_cp.loc[events_cp['trial_type'].str.contains(cfg['single_trial_id']), 'trial_type'] = 'O'
                 X = create_design_matrix(ddict['tr'], ft, events_cp, hrf_model=cfg['hrf_model'], hrf_idx=hrf_idx)
-
-                model = LinearRegression(fit_intercept=False)
-                for this_n_comps in np.unique(ddict['opt_noise_n_comps'][run, :]):
-                    # If n_comps is 0, then R2 was negative and we
-                    # don't want to denoise, so continue
-                    if this_n_comps == 0:
-                        continue
-
-                    this_X = X.copy()
-                    this_X.iloc[:, :-1] = hp_filter(this_X.iloc[:, :-1].to_numpy(), ddict, cfg, logger)
-
-                    # Find voxels that correspond to this_n_comps
-                    this_vox_idx = opt_n_comps == this_n_comps
-                    # Exclude voxels without signal
-                    this_vox_idx = np.logical_and(vox_idx, this_vox_idx)
-                    
-                    X_n = conf[:, :this_n_comps]
-                    this_X.iloc[:, :] = this_X.to_numpy() - model.fit(X_n, this_X.to_numpy()).predict(X_n)
-                    this_X.iloc[:, :-1] = this_X.iloc[:, :-1] / this_X.iloc[:, :-1].max(axis=0)
-                
-                    # Run GLM and compute contrast for this single trial and other conditions
-                    labels, results = run_glm(Y[:, this_vox_idx], this_X.to_numpy(), noise_model=cfg['single_trial_noise_model'])
+                X.iloc[:, :-1] = hp_filter(X.iloc[:, :-1].to_numpy(), ddict, cfg, logger)
+                # Loop across unique n comps
+                for this_vox_idx, this_X, labels, results in yield_glm_results(vox_idx, Y, X, conf, run, ddict, cfg, noise_model=cfg['single_trial_noise_model']):
                     residuals[:, this_vox_idx] += get_param_from_glm('residuals', labels, results, this_X, time_series=True)
                     r2[this_vox_idx] += get_param_from_glm('r_square', labels, results, this_X, time_series=False)
 
                     cvec = np.zeros(this_X.shape[1])
                     cvec[this_X.columns.tolist().index('X')] = 1
-                    betas[trial_nr, this_vox_idx] = compute_contrast(labels, results, con_val=cvec, contrast_type='t').effect_size()
+                    patterns[trial_nr, this_vox_idx] = compute_contrast(labels, results, con_val=cvec, contrast_type='t').effect_size()
                     
                     for i, col in enumerate(cond_names):
                         cvec = np.zeros(this_X.shape[1])
                         cvec[this_X.columns.tolist().index(col)] = 1
-                        betas[len(st_names)+i, this_vox_idx] += compute_contrast(labels, results, con_val=cvec, contrast_type='t').effect_size()
+                        patterns[len(st_names)+i, this_vox_idx] += compute_contrast(labels, results, con_val=cvec, contrast_type='t').effect_size()
 
             # Because we estimated the betas for the other conditions len(st_names) times,
             # average them by dividing them by the number of trials
-            betas[len(st_names):, nonzero] /= st_names.size
+            patterns[len(st_names):, nonzero] /= st_names.size
             residuals[:, nonzero] /= st_names.size
             r2[nonzero] /= st_names.size
 
-            st_idx_x = np.zeros(betas.shape[0], dtype=bool)  
+            st_idx_x = np.zeros(patterns.shape[0], dtype=bool)  
             st_idx_x[:len(st_names)] = True
-            st_icept_betas = betas[:len(st_names), :].mean(axis=0)
+            st_icept = patterns[:len(st_names), :].mean(axis=0)
     
-    st_betas = betas[st_idx_x, :]
-    cond_betas = betas[~st_idx_x, :]
+    st_patterns = patterns[st_idx_x, :]
+    cond_patterns = patterns[~st_idx_x, :]
 
-    f_out = op.join(out_dir, cfg['f_base'] + f'_run-{run+1}_desc-stimicept_beta.nii.gz')
-    masking.unmask(st_icept_betas, ddict['mask']).to_filename(f_out)
+    unit = cfg['pattern_units']
+    f_out = op.join(out_dir, cfg['f_base'] + f'_run-{run+1}_desc-stimicept_{unit}.nii.gz')
+    masking.unmask(st_icept, ddict['mask']).to_filename(f_out)
 
-    rdm = 1 - np.corrcoef(st_betas)
+    rdm = 1 - np.corrcoef(st_patterns)
     plt.imshow(rdm)
     plt.savefig(f"rdm_run{run+1}_model-{cfg['hrf_model'].replace(' ', '')}_type-{cfg['single_trial_model']}.png")
     plt.close()
     for i, name in enumerate(cond_names):    
-        f_out = op.join(out_dir, cfg['f_base'] + f'_run-{run+1}_desc-{name}_beta.nii.gz')
-        masking.unmask(cond_betas[i, :], ddict['mask']).to_filename(f_out)
+        f_out = op.join(out_dir, cfg['f_base'] + f'_run-{run+1}_desc-{name}_{unit}.nii.gz')
+        masking.unmask(cond_patterns[i, :], ddict['mask']).to_filename(f_out)
 
-    f_out = op.join(out_dir, cfg['f_base'] + f'_run-{run+1}_desc-trial_beta.nii.gz')
-    masking.unmask(st_betas, ddict['mask']).to_filename(f_out)
+    f_out = op.join(out_dir, cfg['f_base'] + f'_run-{run+1}_desc-trial_{unit}.nii.gz')
+    masking.unmask(st_patterns, ddict['mask']).to_filename(f_out)
 
     f_out = op.join(out_dir, cfg['f_base'] + f'_run-{run+1}_residuals.nii.gz')
     masking.unmask(residuals, ddict['mask']).to_filename(f_out)
@@ -235,7 +208,7 @@ def run_signal_processing(ddict, cfg, logger):
         else:  # specific HRF for each voxel and run (overfitting to the maxxxxx)
             best_hrf_idx = r2.argmax(axis=1).astype(int)
     else:
-        # bit of a hack
+        # bit of a hack: set all voxels to the same HRF (index: 0)
         best_hrf_idx = np.zeros(ddict['denoised_func'].shape[1]).astype(int)
     
     #best_hrf_idx = np.random.randint(20, size=ddict['denoised_func'].shape[1])
@@ -246,27 +219,7 @@ def run_signal_processing(ddict, cfg, logger):
         (run, best_hrf_idx, out_dir, ddict, cfg, logger) for run in np.unique(ddict['run_idx'])
     )
 
-
-def get_param_from_glm(name, labels, results, dm, time_series=False, predictors=False):
-    """ Get parameters from a fitted nistats GLM. """
-    if predictors and time_series:
-        raise ValueError("Cannot get predictors and time series.")
-
-    if time_series:
-        data = np.zeros((dm.shape[0], labels.size))
-    elif predictors:
-        data = np.zeros((dm.shape[1], labels.size))
-    else:
-        data = np.zeros_like(labels)
-
-    for lab in np.unique(labels):
-        data[..., labels == lab] = getattr(results[lab], name)
-    
-    return data
-
-
-
-    
+ 
 def create_design_matrix(tr, frame_times, events, hrf_model='kay', hrf_idx=None):
     """ Creates a design matrix based on a HRF from Kendrick Kay's set
     or a default one from Nistats. """
@@ -326,12 +279,3 @@ def create_design_matrix(tr, frame_times, events, hrf_model='kay', hrf_idx=None)
             dms = dms[0]
 
         return dms 
-
-
-def get_frame_times(ddict, cfg, Y):
-    """ Computes frame times for a particular time series (and TR). """
-    tr = ddict['tr']
-    n_vol = Y.shape[0]
-    st_ref = cfg['slice_time_ref']
-    ft = np.linspace(st_ref * tr, n_vol * tr + st_ref * tr, n_vol, endpoint=False)
-    return ft
