@@ -60,7 +60,6 @@ def main(bids_dir, out_dir, fprep_dir, ricor_dir, subject, start_from, session, 
 
     ##### <start processing loop> #####
     for i, sub in enumerate(cfg['subject']):
-        print(cfg['session'][i])
         for ii, ses in enumerate(cfg['session'][i]):
             for task in cfg['task'][i][ii]:
                 if task is None:

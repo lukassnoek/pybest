@@ -38,7 +38,7 @@ def preprocess_funcs(ddict, cfg, logger):
 
     if 'fs' not in cfg['space']:  # no need for mask in surface files
         if ddict['gm_prob'] is None:  # use functional brain masks
-            logger.info("Creating mask by intersection of function masks")
+            logger.info("Creating mask by intersection of fMRI masks")
             fmasks = [f.replace('desc-preproc_bold', 'desc-brain_mask') for f in ddict['funcs']]
             mask = masking.intersect_masks(fmasks, threshold=0.8)
         else:
@@ -160,7 +160,6 @@ def preprocess_events(ddict, cfg, logger):
     data_ = []
     for i, event in enumerate(ddict['events']):
         data = pd.read_csv(event, sep='\t')
-        print(data)
         for col in to_keep:
             if col not in data.columns:
                 raise ValueError(f"No column '{col}' in {event}!")
@@ -175,20 +174,17 @@ def preprocess_events(ddict, cfg, logger):
         # st = single trials
         st_idx = data['trial_type'].str.contains(cfg['single_trial_id'])
         n_st = data.loc[st_idx, :].shape[0]
-        n_unique_st = data.loc[st_idx, 'trial_type'].unique().size
-        if n_st != n_unique_st:
-            logger.warning(
-                f"Found only {n_unique_st} unique trial-types across {n_st}"
-                "single trials!"
-            )
         
         # Setting a unique trial-type for single trials
         data.loc[st_idx, 'trial_type'] = [f'{str(i).zfill(3)}_{s}' for i, s in enumerate(data.loc[st_idx, 'trial_type'])]
 
         n_other = data.loc[~st_idx, 'trial_type'].unique().size        
-        logger.info(f"Found {n_unique_st} single trials and {n_other} other conditions for run {i+1}")
+        logger.info(f"Found {n_st} single trials and {n_other} other conditions for run {i+1}")
         
         data['run'] = i+1
+        sort_cols = ['onset', 'duration', 'trial_type', 'run']
+        other_cols = [col for col in data.columns if col not in sort_cols]
+        data = data.loc[:, sort_cols + other_cols]
         data_.append(data)
 
     out_dir = op.join(cfg['save_dir'], 'preproc')
@@ -202,11 +198,19 @@ def preprocess_events(ddict, cfg, logger):
     #    prev_run = ddict['run_idx'] < run
     #    data_[run].loc[:, 'onset'] = data_[run].loc[:, 'onset'] + prev_run.sum() * ddict['tr']
 
-    data = pd.concat(data_, axis=0)
+    data = pd.concat(data_, axis=0, sort=True)
     f_out = op.join(out_dir, cfg['f_base'] + '_desc-preproc_events.tsv')
     data.to_csv(f_out, sep='\t', index=False)
     
-    logger.info(f"Found in total {data.shape[0]} events across {i+1} runs")
+    st_idx = data['trial_type'].str.contains(cfg['single_trial_id'])
+    n_st = data.loc[st_idx, :].shape[0]
+    other = data.loc[~st_idx, 'trial_type'].unique().tolist()
+    n_other = len(other)
+
+    logger.info(
+        f"Found {data.shape[0]} events across {i+1} runs, of which "
+        f"{n_st} single trials + {n_other} other conditions {other}"
+    )
     ddict['preproc_events'] = data
     return ddict
 

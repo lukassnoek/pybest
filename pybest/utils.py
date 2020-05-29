@@ -136,7 +136,7 @@ def find_exp_parameters(cfg, logger):
                 else:
                     these_task.append([None])
             all_ses_tasks.append(these_task)
-        print(all_ses_tasks)
+        
         cfg['task'] = all_ses_tasks
 
     return cfg
