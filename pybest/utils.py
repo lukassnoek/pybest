@@ -6,9 +6,9 @@ import numpy as np
 import nibabel as nib
 from tqdm import tqdm
 from glob import glob
-from nistats.first_level_model import run_glm
 from nilearn import plotting, signal
 from nilearn.datasets import fetch_surf_fsaverage
+from nilearn.stats.first_level_model import run_glm
 from sklearn.linear_model import LinearRegression
 
 
@@ -20,8 +20,10 @@ def check_parameters(cfg, logger):
         raise ValueError("TR (--tr) needs to be set when using surface data (--space fs*)!")
 
     if cfg['single_trial_id'] is None:
-        logger.warn(f"Empty single-trial-id; all events will be modeled as single trials!")
-        cfg['single_trial_id'] = ''
+        logger.warn("No single-trial-id found; skipping signalproc!")
+        cfg['skip_signalproc'] = True
+        #logger.warn(f"Empty single-trial-id; all events will be modeled as single trials!")
+        #cfg['single_trial_id'] = ''
 
     if cfg['uncorrelation'] and cfg['single_trial_model'] == 'lss':
         raise ValueError("Cannot use uncorrelation in combination with LSS.")
@@ -37,7 +39,6 @@ def set_defaults(cfg, logger):
     if cfg['out_dir'] is None:  # Set default out_dir
         cfg['out_dir'] = op.join(cfg['bids_dir'], 'derivatives', 'pybest')
         if not op.isdir(cfg['out_dir']):
-            logger.info(f"Creating output-directory {cfg['out_dir']}")
             os.makedirs(cfg['out_dir'], exist_ok=True)
 
         logger.info(f"Setting output directory to {cfg['out_dir']}")
@@ -76,7 +77,7 @@ def find_exp_parameters(cfg, logger):
             sorted(glob(op.join(cfg['fprep_dir'], 'sub-*')))
             if op.isdir(s)
         ]
-        logger.info(f"Found {len(cfg['subject'])} participant(s)")
+        logger.info(f"Found {len(cfg['subject'])} participant(s) ({cfg['subject']})")
     else:
         # Use a list by default
         cfg['subject'] = [cfg['subject']]
@@ -91,7 +92,7 @@ def find_exp_parameters(cfg, logger):
                 if op.isdir(s)
             ]
             cfg['session'].append(these_ses)
-            logger.info(f"Found {len(these_ses)} session(s) for sub-{this_sub}")
+            logger.info(f"Found {len(these_ses)} session(s) for sub-{this_sub} {these_ses}")
     else:
         cfg['session'] = [cfg['session']] * len(cfg['subject'])
 
@@ -103,11 +104,11 @@ def find_exp_parameters(cfg, logger):
             for this_ses in these_ses:
                 
                 tmp = glob(op.join(
-                    cfg['bids_dir'],
+                    cfg['fprep_dir'],
                     f'sub-{this_sub}',
                     f'ses-{this_ses}',
                     'func',
-                    f'*_events.tsv'
+                    f'*_desc-preproc_bold.nii.gz'
                 ))
 
                 these_ses_task = list(set(
@@ -115,11 +116,27 @@ def find_exp_parameters(cfg, logger):
                 ))
         
                 these_task.append(these_ses_task)
-                logger.info(f"Found {len(these_ses_task)} task(s) for sub-{this_sub} and ses-{this_ses}")
+                logger.info(f"Found {len(these_ses_task)} task(s) for sub-{this_sub} and ses-{this_ses} {these_ses_task}")
 
             cfg['task'].append(these_task)
     else:
-        cfg['task'] = [[cfg['task']] * len(cfg['session'])] * len(cfg['subject'])
+        tmp = []
+        for this_sub, these_ses in zip(cfg['subject'], cfg['session']):
+            these_task = []
+            for this_ses in these_ses:
+                tmp = glob(op.join(
+                    cfg['fprep_dir'],
+                    f'sub-{this_sub}',
+                    f'ses-{this_ses}',
+                    'func',
+                    f"*task-{cfg['task']}*_desc-preproc_bold.nii.gz"
+                ))
+                if tmp:
+                    these_task.append([cfg['task']])
+                else:
+                    these_task.append([None])
+            tmp.append(these_task)
+        cfg['task'] = tmp
 
     return cfg
 
@@ -127,27 +144,36 @@ def find_exp_parameters(cfg, logger):
 def find_data(cfg, logger):
     """ Finds all data for a given subject/session/task/space/hemi. """
     # Set right "identifier" depending on fsaverage* or volumetric space
-    sub, ses, task, hemi, space = cfg['sub'], cfg['ses'], cfg['task'], cfg['hemi'], cfg['space']
+    sub, ses, task, hemi, space = cfg['c_sub'], cfg['c_ses'], cfg['c_task'], cfg['hemi'], cfg['space']
     space_idf = f'hemi-{hemi}.func.gii' if 'fs' in space else 'desc-preproc_bold.nii.gz'
 
     # Gather funcs, confs, tasks
     fprep_dir = cfg['fprep_dir']
     funcs = sorted(glob(op.join(
-        fprep_dir, f'sub-{sub}', f'ses-{ses}', 'func', f'*task-{task}_*_space-{space}_{space_idf}'
+        fprep_dir, f'sub-{sub}', f'ses-{ses}', 'func', f'*task-{task}*_space-{space}_{space_idf}'
     )))
     confs = sorted(glob(op.join(
-        fprep_dir, f'sub-{sub}', f'ses-{ses}', 'func', f'*desc-confounds_regressors.tsv'
+        fprep_dir, f'sub-{sub}', f'ses-{ses}', 'func', f'*task-{task}*_desc-confounds_regressors.tsv'
     )))
     bids_dir = cfg['bids_dir']
     events = sorted(glob(op.join(
-        bids_dir, f'sub-{sub}', f'ses-{ses}', 'func', f'*task-{task}_*_events.tsv'
+        bids_dir, f'sub-{sub}', f'ses-{ses}', 'func', f'*task-{task}*_events.tsv'
     )))
 
-    # Check if complete
-    if not all(len(funcs) == len(tmp) for tmp in [confs, events]):
-        raise ValueError(
-            f"Found unequal number of funcs ({len(funcs)}), confs ({len(confs)}), and events ({len(events)})."
-        )
+    if len(events) == 0:
+        logger.warning("Did not find event files! Going to assume there's no task involved.")
+        events = None
+        to_check = [confs]
+    else:
+        to_check = [confs, events]
+
+    if not all(len(funcs) == len(tmp) for tmp in to_check):
+        msg = f"Found unequal number of funcs ({len(funcs)}) and confs ({len(confs)})"
+        if events is not None:
+            msg += f" and events ({len(events)})"
+        
+        raise ValueError(msg)
+    
     logger.info(f"Found {len(funcs)} runs for task {task}")
 
     # Also find retroicor files
@@ -257,12 +283,14 @@ def view_surf(file, hemi, space, fs_dir, threshold):
 def get_run_data(ddict, run, func_type='preproc'):
     """ Get the data for a specific run. """
     t_idx = ddict['run_idx'] == run  # timepoint index
-    func = ddict[f'{func_type}_func'][t_idx, :]
-    conf = ddict['preproc_conf'].loc[t_idx, :].to_numpy()
-    events = ddict['preproc_events'].query("run == (@run + 1)")
-
+    func = ddict[f'{func_type}_func'][t_idx, :].copy()
+    conf = ddict['preproc_conf'].copy().loc[t_idx, :].to_numpy()
+    if ddict['preproc_events'] is not None:
+        events = ddict['preproc_events'].copy().query("run == (@run + 1)")
+    else:
+        events = None
     # I think we need an explicit copy here (not sure)
-    return func.copy(), conf.copy(), events.copy()
+    return func, conf, events
 
 
 def yield_glm_results(vox_idx, Y, X, conf, run, ddict, cfg, noise_model='ols'):

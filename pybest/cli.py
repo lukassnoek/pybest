@@ -19,7 +19,7 @@ from .constants import HRF_MODELS
 @click.argument('out_dir', default=None, required=False)
 @click.argument('fprep_dir', default=None, required=False)
 @click.argument('ricor_dir', default=None, required=False)
-@click.argument('subject', nargs=-1, required=False)
+@click.option('--subject', default=None, required=False)
 @click.option('--start-from', type=click.Choice(['preproc', 'noiseproc', 'signalproc']), default='preproc', required=False)
 @click.option('--session', default=None, required=False)
 @click.option('--task', default=None, required=False)
@@ -34,6 +34,7 @@ from .constants import HRF_MODELS
 @click.option('--n-comps', default=100, type=click.INT, show_default=True)
 @click.option('--cv-repeats', default=2, type=click.INT, show_default=True)
 @click.option('--cv-splits', default=5, type=click.INT, show_default=True)
+@click.option('--skip-signalproc', is_flag=True)
 @click.option('--single-trial-id', default=None, type=click.STRING, show_default=True)
 @click.option('--hrf-model', default='kay', type=click.Choice(HRF_MODELS), show_default=True)
 @click.option('--single-trial-noise-model', default='ols', type=click.Choice(['ols', 'ar1']), show_default=True)
@@ -45,8 +46,8 @@ from .constants import HRF_MODELS
 @click.option('--save-all', is_flag=True)
 def main(bids_dir, out_dir, fprep_dir, ricor_dir, subject, start_from, session, task, space, hemi,
          gm_thresh, slice_time_ref, high_pass_type, high_pass, tr, decomp, n_comps, cv_repeats, cv_splits,
-         single_trial_id, hrf_model, single_trial_noise_model, regularize_hrf_model, single_trial_model, pattern_units,
-         uncorrelation, n_cpus, save_all):
+         skip_signalproc, single_trial_id, hrf_model, single_trial_noise_model, regularize_hrf_model, single_trial_model, pattern_units, uncorrelation,
+         n_cpus, save_all):
     """ Main API of pybest. """
 
     ##### set + check parameters #####
@@ -59,8 +60,12 @@ def main(bids_dir, out_dir, fprep_dir, ricor_dir, subject, start_from, session, 
 
     ##### <start processing loop> #####
     for i, sub in enumerate(cfg['subject']):
+        print(cfg['session'][i])
         for ii, ses in enumerate(cfg['session'][i]):
             for task in cfg['task'][i][ii]:
+                if task is None:
+                    continue  # no data for this task in this run
+
                 logger.info(f"Starting process for sub-{sub}, ses-{ses}, task-{task}")
                 
                 # Some bookkeeping
@@ -70,7 +75,8 @@ def main(bids_dir, out_dir, fprep_dir, ricor_dir, subject, start_from, session, 
                     os.makedirs(cfg['out_dir'])
 
                 for key, value in [('sub', sub), ('ses', ses), ('task', task)]:
-                    cfg[key] = value
+                    # c_ stands for "current" (c_task = current task)
+                    cfg['c_' + key] = value
 
                 # ddict = data dictionary
                 ddict = find_data(cfg, logger)
@@ -78,8 +84,11 @@ def main(bids_dir, out_dir, fprep_dir, ricor_dir, subject, start_from, session, 
                 # Start from preproc
                 if start_from not in ['noiseproc', 'signalproc']:
                     ddict = preprocess_funcs(ddict, cfg, logger)
-                    ddict = preprocess_confs(ddict, cfg, logger)                    
-                    ddict = preprocess_events(ddict, cfg, logger)
+                    ddict = preprocess_confs(ddict, cfg, logger)
+                    if not cfg['skip_signalproc']:
+                        ddict = preprocess_events(ddict, cfg, logger)
+                    else:
+                        ddict['preproc_events'] = None
  
                 # If we did preprocessing already ...
                 if start_from == 'noiseproc':
@@ -94,8 +103,8 @@ def main(bids_dir, out_dir, fprep_dir, ricor_dir, subject, start_from, session, 
                     logger.info("Loading denoising parameters")
                     ddict = load_denoising_data(ddict, cfg)
 
-                # Always run signal processing
-                run_signal_processing(ddict, cfg, logger)
+                if not cfg['skip_signalproc']:
+                    run_signal_processing(ddict, cfg, logger)
 
 
 if __name__ == '__main__':

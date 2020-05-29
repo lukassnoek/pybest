@@ -7,7 +7,7 @@ from tqdm import tqdm
 from nilearn import image, masking, signal
 from joblib import Parallel, delayed
 from scipy.signal import savgol_filter
-from nistats.design_matrix import _cosine_drift as dct_set
+from nilearn.stats.first_level_model.design_matrix import _cosine_drift as dct_set
 from sklearn.decomposition import PCA, FastICA
 
 from .logging import tqdm_ctm, tdesc
@@ -101,7 +101,7 @@ def preprocess_confs(ddict, cfg, logger):
     3. High-pass the data (same as functional data)
     4. PCA
     """
-    
+
     logger.info("Starting preprocessing of confounds")
     decomp = PCA() if cfg['decomp'] == 'pca' else FastICA(max_iter=1000)
     
@@ -112,9 +112,7 @@ def preprocess_confs(ddict, cfg, logger):
         data = pd.read_csv(conf, sep='\t')
         to_remove = [col for col in data.columns if 'cosine' in col]
         data = data.drop(to_remove, axis=1)
-
-        if ddict['ricors'] is not None:  # add RETROICOR regressors, if any
-            
+        if cfg['ricor_dir'] is not None and ddict['ricors']:  # add RETROICOR regressors, if any
             ricor_data = pd.read_csv(ddict['ricors'][i], sep='\t')
             data = pd.concat((data, ricor_data), axis=1)
         
@@ -162,6 +160,7 @@ def preprocess_events(ddict, cfg, logger):
     data_ = []
     for i, event in enumerate(ddict['events']):
         data = pd.read_csv(event, sep='\t')
+        print(data)
         for col in to_keep:
             if col not in data.columns:
                 raise ValueError(f"No column '{col}' in {event}!")
@@ -234,14 +233,18 @@ def hp_filter(data, ddict, cfg, logger, standardize='zscore'):
 
 def load_preproc_data(ddict, cfg):
     """ Loads preprocessed data. """
-    sub, ses, task = cfg['sub'], cfg['ses'], cfg['task']
+    sub, ses, task = cfg['c_sub'], cfg['c_ses'], cfg['c_task']
     in_dir = op.join(cfg['save_dir'], 'preproc')
     f_base = f'sub-{sub}_ses-{ses}_task-{task}_desc-preproc_'
     
     f_in = op.join(in_dir, f_base)
     ddict['preproc_func'] = np.load(f_in + 'bold.npy')
     ddict['preproc_conf'] = pd.read_csv(f_in + 'conf.tsv', sep='\t')
-    ddict['preproc_events'] = pd.read_csv(f_in + 'events.tsv', sep='\t')
+    if not cfg['skip_signalproc']:
+        ddict['preproc_events'] = pd.read_csv(f_in + 'events.tsv', sep='\t')
+    else:
+        ddict['preproc_events'] = None
+
     ddict['mask'] = None if 'fs' in cfg['space'] else nib.load(f_in + 'mask.nii.gz')
     ddict['run_idx'] = np.load(op.join(in_dir, 'run_idx.npy'))
 

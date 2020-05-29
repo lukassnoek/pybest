@@ -3,8 +3,8 @@ import matplotlib
 import os.path as op
 import numpy as np
 import pandas as pd
-matplotlib.use('Agg')
-import matplotlib.pyplot as plt
+#matplotlib.use('Agg')
+#import matplotlib.pyplot as plt
 
 from nilearn import masking
 from joblib import Parallel, delayed
@@ -12,11 +12,11 @@ from scipy.linalg import sqrtm
 from scipy.interpolate import interp1d
 from scipy.stats.mstats import rankdata
 from sklearn.linear_model import LinearRegression
-from nistats.first_level_model import run_glm
-from nistats.contrasts import compute_contrast
-from nistats.experimental_paradigm import check_events
-from nistats.design_matrix import make_first_level_design_matrix
-from nistats.hemodynamic_models import _sample_condition, _resample_regressor
+from nilearn.stats.first_level_model import run_glm
+from nilearn.stats.contrasts import compute_contrast
+from nilearn.stats.first_level_model.experimental_paradigm import check_events
+from nilearn.stats.first_level_model.design_matrix import make_first_level_design_matrix
+from nilearn.stats.first_level_model.hemodynamic_models import _sample_condition, _resample_regressor
 
 from .constants import HRFS_HR
 from .preproc import hp_filter
@@ -148,10 +148,10 @@ def _run_single_trial_model(run, best_hrf_idx, out_dir, ddict, cfg, logger):
     f_out = op.join(out_dir, cfg['f_base'] + f'_run-{run+1}_desc-stimicept_{unit}.nii.gz')
     masking.unmask(st_icept, ddict['mask']).to_filename(f_out)
 
-    rdm = 1 - np.corrcoef(st_patterns)
-    plt.imshow(rdm)
-    plt.savefig(f"rdm_run{run+1}_model-{cfg['hrf_model'].replace(' ', '')}_type-{cfg['single_trial_model']}.png")
-    plt.close()
+    #rdm = 1 - np.corrcoef(st_patterns)
+    #plt.imshow(rdm)
+    #plt.savefig(f"rdm_run{run+1}_model-{cfg['hrf_model'].replace(' ', '')}_type-{cfg['single_trial_model']}.png")
+    #plt.close()
     for i, name in enumerate(cond_names):    
         f_out = op.join(out_dir, cfg['f_base'] + f'_run-{run+1}_desc-{name}_{unit}.nii.gz')
         masking.unmask(cond_patterns[i, :], ddict['mask']).to_filename(f_out)
