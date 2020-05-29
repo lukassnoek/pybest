@@ -108,7 +108,7 @@ def find_exp_parameters(cfg, logger):
                     f'sub-{this_sub}',
                     f'ses-{this_ses}',
                     'func',
-                    f'*_desc-preproc_bold.nii.gz'
+                    f"*space-{cfg['space']}*_desc-preproc_bold.nii.gz"
                 ))
 
                 these_ses_task = list(set(
@@ -120,7 +120,7 @@ def find_exp_parameters(cfg, logger):
 
             cfg['task'].append(these_task)
     else:
-        tmp = []
+        all_ses_tasks = []
         for this_sub, these_ses in zip(cfg['subject'], cfg['session']):
             these_task = []
             for this_ses in these_ses:
@@ -129,14 +129,15 @@ def find_exp_parameters(cfg, logger):
                     f'sub-{this_sub}',
                     f'ses-{this_ses}',
                     'func',
-                    f"*task-{cfg['task']}*_desc-preproc_bold.nii.gz"
+                    f"*task-{cfg['task']}*_space-{cfg['space']}*_desc-preproc_bold.nii.gz"
                 ))
                 if tmp:
                     these_task.append([cfg['task']])
                 else:
                     these_task.append([None])
-            tmp.append(these_task)
-        cfg['task'] = tmp
+            all_ses_tasks.append(these_task)
+        print(all_ses_tasks)
+        cfg['task'] = all_ses_tasks
 
     return cfg
 

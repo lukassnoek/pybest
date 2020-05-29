@@ -61,7 +61,7 @@ def run_noise_processing(ddict, cfg, logger):
         for run in np.unique(ddict['run_idx'])
     )
 
-    sub, ses, task = cfg['sub'], cfg['ses'], cfg['task']
+    sub, ses, task = cfg['c_sub'], cfg['c_ses'], cfg['c_task']
 
     # Pre-allocate parameter array (runs x voxels)
     # Note to self: make sure these are ints! == with floats doesn't work well
