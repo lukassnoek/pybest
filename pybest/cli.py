@@ -17,8 +17,8 @@ from .constants import HRF_MODELS
 @click.command()
 @click.argument('bids_dir')
 @click.argument('out_dir', default=None, required=False)
-@click.argument('fprep_dir', default=None, required=False)
-@click.argument('ricor_dir', default=None, required=False)
+@click.option('--fprep_dir', default=None, required=False)
+@click.option('--ricor_dir', default=None, required=False)
 @click.option('--subject', default=None, required=False)
 @click.option('--start-from', type=click.Choice(['preproc', 'noiseproc', 'signalproc']), default='preproc', required=False)
 @click.option('--session', default=None, required=False)
@@ -60,16 +60,24 @@ def main(bids_dir, out_dir, fprep_dir, ricor_dir, subject, start_from, session, 
 
     ##### <start processing loop> #####
     for i, sub in enumerate(cfg['subject']):
+
         for ii, ses in enumerate(cfg['session'][i]):
+
             for task in cfg['task'][i][ii]:
                 if task is None:
                     continue  # no data for this task in this run
 
-                logger.info(f"Starting process for sub-{sub}, ses-{ses}, task-{task}")
+                to_add = '' if ses is None else f' ses-{ses} '
+                logger.info(f"Starting process for sub-{sub},{to_add} task-{task}")
                 
                 # Some bookkeeping
-                cfg['f_base'] = f"sub-{sub}_ses-{ses}_task-{task}"
-                cfg['save_dir'] = op.join(cfg['out_dir'], f'sub-{sub}', f'ses-{ses}')
+                if ses is None:
+                    cfg['f_base'] = f"sub-{sub}_task-{task}"
+                    cfg['save_dir'] = op.join(cfg['out_dir'], f'sub-{sub}')
+                else:
+                    cfg['f_base'] = f"sub-{sub}_ses-{ses}_task-{task}"
+                    cfg['save_dir'] = op.join(cfg['out_dir'], f'sub-{sub}', f'ses-{ses}')
+                
                 if not op.isdir(cfg['out_dir']):
                     os.makedirs(cfg['out_dir'])
 

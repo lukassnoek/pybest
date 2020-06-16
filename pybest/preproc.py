@@ -239,7 +239,10 @@ def load_preproc_data(ddict, cfg):
     """ Loads preprocessed data. """
     sub, ses, task = cfg['c_sub'], cfg['c_ses'], cfg['c_task']
     in_dir = op.join(cfg['save_dir'], 'preproc')
-    f_base = f'sub-{sub}_ses-{ses}_task-{task}_desc-preproc_'
+    if ses is None:
+        f_base = f'sub-{sub}_task-{task}_desc-preproc_'
+    else:
+        f_base = f'sub-{sub}_ses-{ses}_task-{task}_desc-preproc_'
     
     f_in = op.join(in_dir, f_base)
     ddict['preproc_func'] = np.load(f_in + 'bold.npy')

@@ -109,7 +109,11 @@ def run_noise_processing(ddict, cfg, logger):
         if not op.isdir(out_dir):
             os.makedirs(out_dir)
 
-        f_base = f'sub-{sub}_ses-{ses}_task-{task}_run-{run+1}_desc-'
+        if ses is None:
+            f_base = f'sub-{sub}_task-{task}_run-{run+1}_desc-'
+        else:
+            f_base = f'sub-{sub}_ses-{ses}_task-{task}_run-{run+1}_desc-'
+
         to_save = [  # This should always be saved
             (r2_max, 'max_r2'),
             (opt_n_comps, 'opt_ncomps'),
@@ -139,21 +143,28 @@ def load_denoising_data(ddict, cfg):
     """ Loads the denoising parameters/data. """
 
     sub, ses, task = cfg['c_sub'], cfg['c_ses'], cfg['c_task']
+    if ses is None:
+        f_base = f'sub-{sub}_task-{task}'
+    else:
+        f_base = f'sub-{sub}_ses-{ses}_task-{task}'
+
     preproc_dir = op.join(cfg['save_dir'], 'preproc')
     denoising_dir = op.join(cfg['save_dir'], 'denoising')
-    ddict['opt_noise_n_comps'] = np.vstack([np.load(f) for f in sorted(glob(op.join(denoising_dir, '*-opt_ncomps.npy')))]).astype(int)
-    ddict['denoised_func'] = np.load(op.join(denoising_dir, f'sub-{sub}_ses-{ses}_task-{task}_desc-denoised_bold.npy'))
-    ddict['preproc_conf'] = pd.read_csv(op.join(preproc_dir, f'sub-{sub}_ses-{ses}_task-{task}_desc-preproc_conf.tsv'), sep='\t')
+    ddict['opt_noise_n_comps'] = np.vstack(
+        [np.load(f) for f in sorted(glob(op.join(denoising_dir, '*-opt_ncomps.npy')))]
+    ).astype(int)
+    ddict['denoised_func'] = np.load(op.join(denoising_dir, f'{f_base}_desc-denoised_bold.npy'))
+    ddict['preproc_conf'] = pd.read_csv(op.join(preproc_dir, f'{f_base}_desc-preproc_conf.tsv'), sep='\t')
     
     if not cfg['skip_signalproc']:
-        ddict['preproc_events'] = pd.read_csv(op.join(preproc_dir, f'sub-{sub}_ses-{ses}_task-{task}_desc-preproc_events.tsv'), sep='\t')
+        ddict['preproc_events'] = pd.read_csv(op.join(preproc_dir, f'{f_base}_desc-preproc_events.tsv'), sep='\t')
     else:
         ddict['preproc_events'] = None
 
     if 'fs' in cfg['space']:
         ddict['mask'] = None
     else:
-        ddict['mask'] = nib.load(op.join(preproc_dir, f'sub-{sub}_ses-{ses}_task-{task}_desc-preproc_mask.nii.gz'))
+        ddict['mask'] = nib.load(op.join(preproc_dir, f'{f_base}_desc-preproc_mask.nii.gz'))
     ddict['run_idx'] = np.load(op.join(preproc_dir, 'run_idx.npy'))
 
     return ddict

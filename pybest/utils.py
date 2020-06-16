@@ -22,8 +22,6 @@ def check_parameters(cfg, logger):
     if cfg['single_trial_id'] is None:
         logger.warn("No single-trial-id found; skipping signalproc!")
         cfg['skip_signalproc'] = True
-        #logger.warn(f"Empty single-trial-id; all events will be modeled as single trials!")
-        #cfg['single_trial_id'] = ''
 
     if cfg['uncorrelation'] and cfg['single_trial_model'] == 'lss':
         raise ValueError("Cannot use uncorrelation in combination with LSS.")
@@ -45,19 +43,21 @@ def set_defaults(cfg, logger):
 
     if cfg['fprep_dir'] is None:
         cfg['fprep_dir'] = op.join(cfg['bids_dir'], 'derivatives', 'fmriprep')
+        logger.info(f"Setting Fmriprep directory to {cfg['fprep_dir']}")
+
         if not op.isdir(cfg['fprep_dir']):
             raise ValueError(f"Fmriprep directory {cfg['fprep_dir']} does not exist.")
-
-        logger.info(f"Setting Fmriprep directory to {cfg['fprep_dir']}")
 
     if cfg['ricor_dir'] is None:
         cfg['ricor_dir'] = op.join(cfg['bids_dir'], 'derivatives', 'physiology')
         if not op.isdir(cfg['ricor_dir']):
             cfg['ricor_dir'] = None
             logger.info("No RETROICOR directory, so assuming no physio data.")
-    
-    if cfg['ricor_dir'] is not None:
+    else:
         logger.info(f"Setting RETROICOR directory to {cfg['ricor_dir']}")
+
+    if cfg['session'] is None:
+        logger.warning(f"No session identifier given; assuming a single session.")
 
     if cfg['gm_thresh'] == 0:
         cfg['gm_thresh'] = None
@@ -77,7 +77,7 @@ def find_exp_parameters(cfg, logger):
             sorted(glob(op.join(cfg['fprep_dir'], 'sub-*')))
             if op.isdir(s)
         ]
-        logger.info(f"Found {len(cfg['subject'])} participant(s) ({cfg['subject']})")
+        logger.info(f"Found {len(cfg['subject'])} participant(s) {cfg['subject']}")
     else:
         # Use a list by default
         cfg['subject'] = [cfg['subject']]
@@ -91,8 +91,9 @@ def find_exp_parameters(cfg, logger):
                 sorted(glob(op.join(cfg['fprep_dir'], f'sub-{this_sub}', 'ses-*')))
                 if op.isdir(s)
             ]
-            cfg['session'].append(these_ses)
             logger.info(f"Found {len(these_ses)} session(s) for sub-{this_sub} {these_ses}")
+            these_ses = [None] if not these_ses else these_ses
+            cfg['session'].append(these_ses)
     else:
         cfg['session'] = [cfg['session']] * len(cfg['subject'])
 
@@ -102,21 +103,32 @@ def find_exp_parameters(cfg, logger):
         for this_sub, these_ses in zip(cfg['subject'], cfg['session']):
             these_task = []
             for this_ses in these_ses:
+                if this_ses is None:  # only single session!
+                    tmp = glob(op.join(
+                        cfg['fprep_dir'],
+                        f'sub-{this_sub}',
+                        'func',
+                        f"*space-{cfg['space']}*_desc-preproc_bold.nii.gz"
+                    ))
+                else:
+                    tmp = glob(op.join(
+                        cfg['fprep_dir'],
+                        f'sub-{this_sub}',
+                        f'ses-{this_ses}' ,
+                        'func',
+                        f"*space-{cfg['space']}*_desc-preproc_bold.nii.gz"
+                    ))
                 
-                tmp = glob(op.join(
-                    cfg['fprep_dir'],
-                    f'sub-{this_sub}',
-                    f'ses-{this_ses}',
-                    'func',
-                    f"*space-{cfg['space']}*_desc-preproc_bold.nii.gz"
-                ))
-
                 these_ses_task = list(set(
                     [op.basename(f).split('task-')[1].split('_')[0] for f in tmp]
                 ))
         
                 these_task.append(these_ses_task)
-                logger.info(f"Found {len(these_ses_task)} task(s) for sub-{this_sub} and ses-{this_ses} {these_ses_task}")
+                
+                to_add = "" if this_ses is None else f"and ses-{this_ses}" 
+                msg = f"Found {len(these_ses_task)} task(s) for sub-{this_sub} {to_add} {these_ses_task}"
+
+                logger.info(msg)
 
             cfg['task'].append(these_task)
     else:
@@ -124,13 +136,21 @@ def find_exp_parameters(cfg, logger):
         for this_sub, these_ses in zip(cfg['subject'], cfg['session']):
             these_task = []
             for this_ses in these_ses:
-                tmp = glob(op.join(
-                    cfg['fprep_dir'],
-                    f'sub-{this_sub}',
-                    f'ses-{this_ses}',
-                    'func',
-                    f"*task-{cfg['task']}*_space-{cfg['space']}*_desc-preproc_bold.nii.gz"
-                ))
+                if this_ses is None:
+                    tmp = glob(op.join(
+                        cfg['fprep_dir'],
+                        f'sub-{this_sub}',
+                        'func',
+                        f"*task-{cfg['task']}*_space-{cfg['space']}*_desc-preproc_bold.nii.gz"
+                    ))
+                else:
+                    tmp = glob(op.join(
+                        cfg['fprep_dir'],
+                        f'sub-{this_sub}',
+                        f'ses-{this_ses}',
+                        'func',
+                        f"*task-{cfg['task']}*_space-{cfg['space']}*_desc-preproc_bold.nii.gz"
+                    ))
                 if tmp:
                     these_task.append([cfg['task']])
                 else:
@@ -150,16 +170,21 @@ def find_data(cfg, logger):
 
     # Gather funcs, confs, tasks
     fprep_dir = cfg['fprep_dir']
-    funcs = sorted(glob(op.join(
-        fprep_dir, f'sub-{sub}', f'ses-{ses}', 'func', f'*task-{task}*_space-{space}_{space_idf}'
-    )))
-    confs = sorted(glob(op.join(
-        fprep_dir, f'sub-{sub}', f'ses-{ses}', 'func', f'*task-{task}*_desc-confounds_regressors.tsv'
-    )))
+    if cfg['c_ses'] is None:
+        ffunc_dir = op.join(fprep_dir, f'sub-{sub}', 'func')
+    else:
+        ffunc_dir = op.join(fprep_dir, f'sub-{sub}', f'ses-{ses}', 'func')
+
+    funcs = sorted(glob(op.join(ffunc_dir, f'*task-{task}*_space-{space}_{space_idf}')))
+    confs = sorted(glob(op.join(ffunc_dir, f'*task-{task}*_desc-confounds_regressors.tsv')))
+
     bids_dir = cfg['bids_dir']
-    events = sorted(glob(op.join(
-        bids_dir, f'sub-{sub}', f'ses-{ses}', 'func', f'*task-{task}*_events.tsv'
-    )))
+    if cfg['c_ses'] is None:
+        bfunc_dir = op.join(bids_dir, f'sub-{sub}', 'func')
+    else:
+        bfunc_dir = op.join(bids_dir, f'sub-{sub}', f'ses-{ses}', 'func')
+
+    events = sorted(glob(op.join(bfunc_dir, f'*task-{task}*_events.tsv')))
 
     if len(events) == 0:
         logger.warning("Did not find event files! Going to assume there's no task involved.")
