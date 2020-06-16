@@ -29,7 +29,7 @@ def _run_parallel(run, ddict, cfg, logger, n_comps, cv):
     r2s = np.zeros((n_comps.size, func.shape[1]))
 
     # Loop over number of components
-    model = LinearRegression(fit_intercept=False)
+    model = LinearRegression(fit_intercept=False, n_jobs=1)
     for i, n_comp in enumerate(tqdm_ctm(n_comps, tdesc(f'Noise proc run {run+1}:'))):
         # Check number of components
         if n_comp > conf.shape[1]:
@@ -84,7 +84,7 @@ def run_noise_processing(ddict, cfg, logger):
         # Start denoising! Loop over unique indices
         func, conf, _ = get_run_data(ddict, run, func_type='preproc')
         nonzero = ~np.all(np.isclose(func, 0.), axis=0)
-        model = LinearRegression(fit_intercept=False)
+        model = LinearRegression(fit_intercept=False, n_jobs=1)
         for this_n_comps in np.unique(opt_n_comps):
             # If n_comps is 0, then R2 was negative and we
             # don't want to denoise, so continue

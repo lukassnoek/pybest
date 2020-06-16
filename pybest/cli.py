@@ -1,7 +1,6 @@
 import os
 import click
 import os.path as op
-import numpy as np
 import nibabel as nib
 from glob import glob
 from .logging import logger
@@ -25,7 +24,7 @@ from .constants import HRF_MODELS
 @click.option('--task', default=None, required=False)
 @click.option('--space', default='T1w', show_default=True)
 @click.option('--hemi', type=click.Choice(['L', 'R']), default='L', show_default=True)
-@click.option('--gm-thresh', default=0.9, show_default=True)  # maybe use a "mask" option
+@click.option('--gm-thresh', default=0, show_default=True)  # maybe use a "mask" option
 @click.option('--slice-time-ref', type=click.FLOAT, default=0.5, show_default=True)
 @click.option('--high-pass-type', type=click.Choice(['dct', 'savgol']), default='dct', show_default=True)
 @click.option('--high-pass', default=0.01, show_default=True)
