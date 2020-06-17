@@ -15,9 +15,10 @@ from sklearn.linear_model import LinearRegression
 def check_parameters(cfg, logger):
     """ Checks parameter settings and raises errors in case of
     incompatible parameters. """
-    
+
     if 'fs' in cfg['space'] and cfg['tr'] is None:
-        raise ValueError("TR (--tr) needs to be set when using surface data (--space fs*)!")
+        raise ValueError(
+            "TR (--tr) needs to be set when using surface data (--space fs*)!")
 
     if cfg['single_trial_id'] is None:
         logger.warn("No single-trial-id found; skipping signalproc!")
@@ -46,10 +47,12 @@ def set_defaults(cfg, logger):
         logger.info(f"Setting Fmriprep directory to {cfg['fprep_dir']}")
 
         if not op.isdir(cfg['fprep_dir']):
-            raise ValueError(f"Fmriprep directory {cfg['fprep_dir']} does not exist.")
+            raise ValueError(
+                f"Fmriprep directory {cfg['fprep_dir']} does not exist.")
 
     if cfg['ricor_dir'] is None:
-        cfg['ricor_dir'] = op.join(cfg['bids_dir'], 'derivatives', 'physiology')
+        cfg['ricor_dir'] = op.join(
+            cfg['bids_dir'], 'derivatives', 'physiology')
         if not op.isdir(cfg['ricor_dir']):
             cfg['ricor_dir'] = None
             logger.info("No RETROICOR directory, so assuming no physio data.")
@@ -57,7 +60,8 @@ def set_defaults(cfg, logger):
         logger.info(f"Setting RETROICOR directory to {cfg['ricor_dir']}")
 
     if cfg['session'] is None:
-        logger.warning(f"No session identifier given; assuming a single session.")
+        logger.warning(
+            f"No session identifier given; assuming a single session.")
 
     if cfg['gm_thresh'] == 0:
         cfg['gm_thresh'] = None
@@ -70,6 +74,10 @@ def set_defaults(cfg, logger):
 
 def find_exp_parameters(cfg, logger):
     """ Extracts experimental parameters. """
+
+    hemi, space = cfg['hemi'], cfg['space']
+    space_idf = f'hemi-{hemi}.func.gii' if 'fs' in space else 'desc-preproc_bold.nii.gz'
+
     # Use all possible participants if not provided
     if cfg['subject'] is None:
         cfg['subject'] = [
@@ -77,7 +85,8 @@ def find_exp_parameters(cfg, logger):
             sorted(glob(op.join(cfg['fprep_dir'], 'sub-*')))
             if op.isdir(s)
         ]
-        logger.info(f"Found {len(cfg['subject'])} participant(s) {cfg['subject']}")
+        logger.info(
+            f"Found {len(cfg['subject'])} participant(s) {cfg['subject']}")
     else:
         # Use a list by default
         cfg['subject'] = [cfg['subject']]
@@ -88,10 +97,12 @@ def find_exp_parameters(cfg, logger):
         for this_sub in cfg['subject']:
             these_ses = [
                 op.basename(s).split('-')[1] for s in
-                sorted(glob(op.join(cfg['fprep_dir'], f'sub-{this_sub}', 'ses-*')))
+                sorted(
+                    glob(op.join(cfg['fprep_dir'], f'sub-{this_sub}', 'ses-*')))
                 if op.isdir(s)
             ]
-            logger.info(f"Found {len(these_ses)} session(s) for sub-{this_sub} {these_ses}")
+            logger.info(
+                f"Found {len(these_ses)} session(s) for sub-{this_sub} {these_ses}")
             these_ses = [None] if not these_ses else these_ses
             cfg['session'].append(these_ses)
     else:
@@ -108,24 +119,25 @@ def find_exp_parameters(cfg, logger):
                         cfg['fprep_dir'],
                         f'sub-{this_sub}',
                         'func',
-                        f"*space-{cfg['space']}*_desc-preproc_bold.nii.gz"
+                        f"*space-{cfg['space']}*_{space_idf}"
                     ))
                 else:
                     tmp = glob(op.join(
                         cfg['fprep_dir'],
                         f'sub-{this_sub}',
-                        f'ses-{this_ses}' ,
+                        f'ses-{this_ses}',
                         'func',
-                        f"*space-{cfg['space']}*_desc-preproc_bold.nii.gz"
+                        f"*space-{cfg['space']}*_{space_idf}"
                     ))
-                
+
                 these_ses_task = list(set(
-                    [op.basename(f).split('task-')[1].split('_')[0] for f in tmp]
+                    [op.basename(f).split('task-')[1].split('_')[0]
+                     for f in tmp]
                 ))
-        
+
                 these_task.append(these_ses_task)
-                
-                to_add = "" if this_ses is None else f"and ses-{this_ses}" 
+
+                to_add = "" if this_ses is None else f"and ses-{this_ses}"
                 msg = f"Found {len(these_ses_task)} task(s) for sub-{this_sub} {to_add} {these_ses_task}"
 
                 logger.info(msg)
@@ -141,7 +153,7 @@ def find_exp_parameters(cfg, logger):
                         cfg['fprep_dir'],
                         f'sub-{this_sub}',
                         'func',
-                        f"*task-{cfg['task']}*_space-{cfg['space']}*_desc-preproc_bold.nii.gz"
+                        f"*task-{cfg['task']}*_space-{cfg['space']}*_{space_idf}"
                     ))
                 else:
                     tmp = glob(op.join(
@@ -149,14 +161,14 @@ def find_exp_parameters(cfg, logger):
                         f'sub-{this_sub}',
                         f'ses-{this_ses}',
                         'func',
-                        f"*task-{cfg['task']}*_space-{cfg['space']}*_desc-preproc_bold.nii.gz"
+                        f"*task-{cfg['task']}*_space-{cfg['space']}*_{space_idf}"
                     ))
                 if tmp:
                     these_task.append([cfg['task']])
                 else:
                     these_task.append([None])
             all_ses_tasks.append(these_task)
-        
+
         cfg['task'] = all_ses_tasks
 
     return cfg
@@ -175,8 +187,10 @@ def find_data(cfg, logger):
     else:
         ffunc_dir = op.join(fprep_dir, f'sub-{sub}', f'ses-{ses}', 'func')
 
-    funcs = sorted(glob(op.join(ffunc_dir, f'*task-{task}*_space-{space}_{space_idf}')))
-    confs = sorted(glob(op.join(ffunc_dir, f'*task-{task}*_desc-confounds_regressors.tsv')))
+    funcs = sorted(
+        glob(op.join(ffunc_dir, f'*task-{task}*_space-{space}_{space_idf}')))
+    confs = sorted(
+        glob(op.join(ffunc_dir, f'*task-{task}*_desc-confounds_regressors.tsv')))
 
     bids_dir = cfg['bids_dir']
     if cfg['c_ses'] is None:
@@ -187,7 +201,8 @@ def find_data(cfg, logger):
     events = sorted(glob(op.join(bfunc_dir, f'*task-{task}*_events.tsv')))
 
     if len(events) == 0:
-        logger.warning("Did not find event files! Going to assume there's no task involved.")
+        logger.warning(
+            "Did not find event files! Going to assume there's no task involved.")
         events = None
         to_check = [confs]
     else:
@@ -197,9 +212,9 @@ def find_data(cfg, logger):
         msg = f"Found unequal number of funcs ({len(funcs)}) and confs ({len(confs)})"
         if events is not None:
             msg += f" and events ({len(events)})"
-        
+
         raise ValueError(msg)
-    
+
     logger.info(f"Found {len(funcs)} runs for task {task}")
 
     # Also find retroicor files
@@ -226,10 +241,13 @@ def find_data(cfg, logger):
 
     if cfg['tr'] is None:
         tr = np.round(nib.load(funcs[0]).header['pixdim'][4], 3)
-        logger.warning(f"TR is not set; using TR from first func ({tr:.3f} sec.)")
+        logger.warning(
+            f"TR is not set; using TR from first func ({tr:.3f} sec.)")
 
     # Store TR in data dict (maybe should use cfg?)
-    ddict['tr'] = tr
+        ddict['tr'] = tr
+    else:
+        ddict['tr'] = cfg['tr']
 
     return ddict
 
@@ -245,9 +263,10 @@ def get_frame_times(ddict, cfg, Y):
     tr = ddict['tr']
     n_vol = Y.shape[0]
     st_ref = cfg['slice_time_ref']
-    ft = np.linspace(st_ref * tr, n_vol * tr + st_ref * tr, n_vol, endpoint=False)
+    ft = np.linspace(st_ref * tr, n_vol * tr +
+                     st_ref * tr, n_vol, endpoint=False)
     return ft
-  
+
 
 def get_param_from_glm(name, labels, results, dm, time_series=False, predictors=False):
     """ Get parameters from a fitted nistats GLM. """
@@ -263,7 +282,7 @@ def get_param_from_glm(name, labels, results, dm, time_series=False, predictors=
 
     for lab in np.unique(labels):
         data[..., labels == lab] = getattr(results[lab], name)
-    
+
     return data
 
 
@@ -274,8 +293,8 @@ def get_param_from_glm(name, labels, results, dm, time_series=False, predictors=
 @click.option('--fs-dir', default=None, required=False)
 @click.option('--threshold', default=0., type=click.FLOAT, required=False)
 def view_surf(file, hemi, space, fs_dir, threshold):
-    """ Utility command to quickly view interactive surface in your browser. 
-    
+    """ Utility command to quickly view interactive surface in your browser.
+
     file : str
         Path to numpy file with vertex data
     hemi : str
@@ -295,7 +314,7 @@ def view_surf(file, hemi, space, fs_dir, threshold):
         fs = fetch_surf_fsaverage(mesh=space)
         mesh = fs[f"infl_{hemi}"]
         bg = fs[f"sulc_{hemi}"]
-        
+
     dat = np.load(file)
     display = plotting.view_surf(
         surf_mesh=mesh,
@@ -332,15 +351,18 @@ def yield_glm_results(vox_idx, Y, X, conf, run, ddict, cfg, noise_model='ols'):
         # with given voxel index
         this_vox_idx = opt_n_comps == this_n_comps
         this_vox_idx = np.logical_and(vox_idx, this_vox_idx)
-        
+
         # Get confound matrix (X_n) and remove from design (this_X)
         X_n = conf[:, :this_n_comps]
         this_X = X.copy()
-        this_X.iloc[:, :] = this_X.to_numpy() - model.fit(X_n, this_X.to_numpy()).predict(X_n)
-        
+        this_X.iloc[:, :] = this_X.to_numpy() - model.fit(X_n,
+                                                          this_X.to_numpy()).predict(X_n)
+
         # Set max to 1 (not sure whether I should actually do this)
-        this_X.iloc[:, :-1] = this_X.iloc[:, :-1] / this_X.iloc[:, :-1].max(axis=0)
-        
+        this_X.iloc[:, :-1] = this_X.iloc[:, :-1] / \
+            this_X.iloc[:, :-1].max(axis=0)
+
         # Refit model on all data this time and remove fitted values
-        labels, results = run_glm(Y[:, this_vox_idx], this_X.to_numpy(), noise_model=noise_model)
+        labels, results = run_glm(
+            Y[:, this_vox_idx], this_X.to_numpy(), noise_model=noise_model)
         yield this_vox_idx, this_X, labels, results
