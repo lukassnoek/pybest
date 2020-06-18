@@ -72,8 +72,12 @@ def preprocess_funcs(ddict, cfg, logger):
     if cfg['save_all']:  # Save run-wise data as niftis for inspection
         for i, (data, _) in enumerate(out):
             # maybe other name/desc (is the same as fmriprep output now)
-            f_out = op.join(out_dir, cfg['f_base'] + f'_run-{i+1}_desc-preproc_bold.nii.gz')
-            masking.unmask(data, ddict['mask']).to_filename(f_out)
+            if 'fs' in cfg['space']:
+                f_out = op.join(out_dir, cfg['f_base'] + f'_run-{i+1}_desc-preproc_bold.npy')
+                np.save(f_out, data)
+            else:
+                f_out = op.join(out_dir, cfg['f_base'] + f'_run-{i+1}_desc-preproc_bold.nii.gz')
+                masking.unmask(data, ddict['mask']).to_filename(f_out)
 
     # Concatenate data in time dimension
     data = np.vstack([d[0] for d in out])
