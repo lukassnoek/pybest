@@ -16,10 +16,6 @@ def check_parameters(cfg, logger):
     """ Checks parameter settings and raises errors in case of
     incompatible parameters. """
 
-    if 'fs' in cfg['space'] and cfg['tr'] is None:
-        raise ValueError(
-            "TR (--tr) needs to be set when using surface data (--space fs*)!")
-
     if cfg['single_trial_id'] is None:
         logger.warn("No single-trial-id found; skipping signalproc!")
         cfg['skip_signalproc'] = True
@@ -239,23 +235,18 @@ def find_data(cfg, logger):
         ricors=ricors, gm_prob=gm_prob
     )
 
-    if cfg['tr'] is None:
-        tr = np.round(nib.load(funcs[0]).header['pixdim'][4], 3)
-        logger.warning(
-            f"TR is not set; using TR from first func ({tr:.3f} sec.)")
-
-    # Store TR in data dict (maybe should use cfg?)
-        ddict['tr'] = tr
-    else:
-        ddict['tr'] = cfg['tr']
-
     return ddict
 
 
-def _load_gifti(f):
+def _load_gifti(f, return_tr=False):
     """ Load gifti array. """
     f_gif = nib.load(f)
-    return np.vstack([arr.data for arr in f_gif.darrays])
+    data = np.vstack([arr.data for arr in f_gif.darrays])
+    tr = float(f_gif.darrays[0].get_metadata()['TimeStep'])
+    if return_tr:
+        return data, tr
+    else:
+        return data
 
 
 def get_frame_times(ddict, cfg, Y):
@@ -288,15 +279,16 @@ def get_param_from_glm(name, labels, results, dm, time_series=False, predictors=
 
 @click.command()
 @click.argument('file')
-@click.option('--hemi', default='L', type=click.Choice(['L', 'R']), required=False)
-@click.option('--space', default='fsaverage6', type=click.Choice(['fsaverage', 'fsaverage5', 'fsaverage6']), required=False)
+@click.option('--hemi', default=None, type=click.Choice(['L', 'R']), required=False)
+@click.option('--space', default=None, type=click.Choice(['fsaverage', 'fsaverage5', 'fsaverage6']), required=False)
 @click.option('--fs-dir', default=None, required=False)
 @click.option('--threshold', default=0., type=click.FLOAT, required=False)
-def view_surf(file, hemi, space, fs_dir, threshold):
+@click.option('--idx', default=None, type=click.INT, required=False)
+def view_surf(file, hemi, space, fs_dir, threshold, idx):
     """ Utility command to quickly view interactive surface in your browser.
 
     file : str
-        Path to numpy file with vertex data
+        Path to numpy file (.npy) with vertex data
     hemi : str
         Hemifield; either L or R
     space : str
@@ -305,17 +297,45 @@ def view_surf(file, hemi, space, fs_dir, threshold):
         Directory with space template (mutually exclusive with `space` param)
     threshold : float
         Minimum value to display
+    idx : int
+        If data has multiple timepoints/observations, visualize the one corresponding to
+        this index
     """
-    if fs_dir is not None:
+
+    if hemi is None:
+        if 'hemi-' in file:
+            hemi = file.split('hemi-')[1][0]
+        else:
+            raise ValueError(
+                "Could not determine hemisphere from filename; "
+                "set it explicitly using --hemi {L,R}"
+            )
+
+    if space is None and fs_dir is None:
+        # Try to determine space from filename
+        if 'space-' in file:
+            space = file.split('space-')[1].split('_')[0]
+        else:
+            raise ValueError(
+                "Could not determine space from filename; "
+                "set it explicitly using --space or --fs-dir"
+            )
+    if fs_dir is not None:  # use data from specified Freesurfer dir
         mesh = op.join(fs_dir, 'surf', f"{hemi.lower()}h.inflated")
         bg = op.join(fs_dir, 'surf', f"{hemi.lower()}h.sulc")
-    else:
+    else:  # fetch template using Nilearn
         hemi = 'left' if hemi == 'L' else 'right'
         fs = fetch_surf_fsaverage(mesh=space)
         mesh = fs[f"infl_{hemi}"]
         bg = fs[f"sulc_{hemi}"]
 
     dat = np.load(file)
+    if idx is not None:
+        dat = dat[idx, :]
+    
+    if dat.ndim > 1:
+        raise ValueError("Data is 2D! Set --idx explicitly")
+
     display = plotting.view_surf(
         surf_mesh=mesh,
         surf_map=dat,

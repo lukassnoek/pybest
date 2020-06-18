@@ -34,13 +34,13 @@ def _optimize_hrf(run, ddict, cfg, logger):
 
     # Create 20 different design matrices
     ft = get_frame_times(ddict, cfg, Y)    
-    dms = create_design_matrix(ddict['tr'], ft, events, hrf_model=cfg['hrf_model'])
+    dms = create_design_matrix(ddict['trs'][run], ft, events, hrf_model=cfg['hrf_model'])
     
     # Pre-allocate R2 array: 20 (hrfs) x K (voxels)
     r2 = np.zeros((20, Y.shape[1]))
     for i, X in enumerate(tqdm_ctm(dms, tdesc(f'Optimizing run {run+1}:'))):
         # High-pass design matrix (except intercept) and remove noise
-        X.iloc[:, :-1] = hp_filter(X.iloc[:, :-1].to_numpy(), ddict, cfg, logger)
+        X.iloc[:, :-1] = hp_filter(X.iloc[:, :-1].to_numpy(), ddict['trs'][run], ddict, cfg, logger)
 
         for this_vox_idx, _, labels, results in yield_glm_results(nonzero, Y, X, conf, run, ddict, cfg, noise_model='ols'):
             r2[i, this_vox_idx] = get_param_from_glm('r_square', labels, results, X, time_series=False)
@@ -77,10 +77,11 @@ def _run_single_trial_model(run, best_hrf_idx, out_dir, ddict, cfg, logger):
         # Create voxel mask (nonzero ^ hrf index)
         vox_idx = best_hrf_idx == hrf_idx
         vox_idx = np.logical_and(vox_idx, nonzero)
-        if cfg['single_trial_model'] == 'lsa':
+        
+        if cfg['single_trial_model'] == 'lsa':  # least-squares all
             # Get current design matrix, hp-filter, and start noise loop
-            X = create_design_matrix(ddict['tr'], ft, events, hrf_model=cfg['hrf_model'], hrf_idx=hrf_idx)
-            X.iloc[:, :-1] = hp_filter(X.iloc[:, :-1].to_numpy(), ddict, cfg, logger)
+            X = create_design_matrix(ddict['trs'][run], ft, events, hrf_model=cfg['hrf_model'], hrf_idx=hrf_idx)
+            X.iloc[:, :-1] = hp_filter(X.iloc[:, :-1].to_numpy(), ddict['trs'][run], ddict, cfg, logger)
             st_idx_x = X.columns.str.contains(cfg['single_trial_id'])
 
             # Loop across unique n comps
@@ -90,14 +91,16 @@ def _run_single_trial_model(run, best_hrf_idx, out_dir, ddict, cfg, logger):
                 preds[:, this_vox_idx] = get_param_from_glm('predicted', labels, results, this_X, time_series=True)
                 r2[this_vox_idx] = get_param_from_glm('r_square', labels, results, this_X, time_series=False)
 
+                # Loop over columns to extract parameters/zscores
                 for i, col in enumerate(this_X.columns):
                     cvec = np.zeros(this_X.shape[1])
                     cvec[this_X.columns.tolist().index(col)] = 1
                     con = compute_contrast(labels, results, con_val=cvec, contrast_type='t')
                     patterns[i, this_vox_idx] = getattr(con, STATS[cfg['pattern_units']])()
 
+                # Get "intercept" (average effect) of single-trials
                 cvec = np.zeros(this_X.shape[1])
-                cvec[st_idx_x] = 1
+                cvec[st_idx_x] = 1  # set all single-trial columns to 1 in contrast-vec
                 con = compute_contrast(labels, results, con_val=cvec, contrast_type='t')
                 st_icept[this_vox_idx] = getattr(con, STATS[cfg['pattern_units']])()
 
@@ -115,8 +118,8 @@ def _run_single_trial_model(run, best_hrf_idx, out_dir, ddict, cfg, logger):
                 # Set to-be-estimated trial to 'X', others to 'O', and create design matrix
                 events_cp.loc[events_cp['trial_type'] == st_name, 'trial_type'] = 'X'
                 events_cp.loc[events_cp['trial_type'].str.contains(cfg['single_trial_id']), 'trial_type'] = 'O'
-                X = create_design_matrix(ddict['tr'], ft, events_cp, hrf_model=cfg['hrf_model'], hrf_idx=hrf_idx)
-                X.iloc[:, :-1] = hp_filter(X.iloc[:, :-1].to_numpy(), ddict, cfg, logger)
+                X = create_design_matrix(ddict['trs'][run], ft, events_cp, hrf_model=cfg['hrf_model'], hrf_idx=hrf_idx)
+                X.iloc[:, :-1] = hp_filter(X.iloc[:, :-1].to_numpy(), ddict['trs'][run], ddict, cfg, logger)
                 # Loop across unique n comps
                 for this_vox_idx, this_X, labels, results in yield_glm_results(vox_idx, Y, X, conf, run, ddict, cfg, noise_model=cfg['single_trial_noise_model']):
                     residuals[:, this_vox_idx] += get_param_from_glm('residuals', labels, results, this_X, time_series=True)

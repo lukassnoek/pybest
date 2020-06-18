@@ -7,7 +7,6 @@ pybest ${bids_dir} \            # e.g. $PWD
     --space T1w \               # alternative: fsaverage, fsnative, MNI152NLin2009cAsym etc.
 	--high-pass-type dct \      # alternative: savgol
     --high-pass 0.01 \           # high-pass cutoff in Hz
-    --tr 1.7 \                  # if not provided, read from nifti header
     --gm-thresh 0 \             # gray-matter mask threshold (0 = use all voxels within *desc-brain_mask.nii.gz)
 	--n-comps 50 \              # number of noise components to try out
 	--cv-splits 5 \             # number of folds ("splits") in noise CV

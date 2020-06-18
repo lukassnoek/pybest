@@ -18,17 +18,19 @@ def _run_func_parallel(ddict, cfg, run, func, logger):
     
     # Load data
     if 'fs' in cfg['space']:  # assume gifti
-        data = _load_gifti(func)
+        data, tr = _load_gifti(func, return_tr=True)
+        tr /= 1000
     else:
         # Mask data and extract stuff
+        tr = nib.load(func).header['pixdim'][4]
         data = masking.apply_mask(func, ddict['mask'])
 
     # By now, data is a 2D array (time x voxels)
-    data = hp_filter(data, ddict, cfg, logger)
+    data = hp_filter(data, tr, ddict, cfg, logger)
     
     # Add to run index
     run_idx = np.ones(data.shape[0]) * run
-    return data, run_idx
+    return data, run_idx, tr
 
 
 def preprocess_funcs(ddict, cfg, logger):
@@ -70,14 +72,15 @@ def preprocess_funcs(ddict, cfg, logger):
         os.makedirs(out_dir)
 
     if cfg['save_all']:  # Save run-wise data as niftis for inspection
-        for i, (data, _) in enumerate(out):
-            # maybe other name/desc (is the same as fmriprep output now)
-            if 'fs' in cfg['space']:
-                f_out = op.join(out_dir, cfg['f_base'] + f'_run-{i+1}_desc-preproc_bold.npy')
-                np.save(f_out, data)
-            else:
-                f_out = op.join(out_dir, cfg['f_base'] + f'_run-{i+1}_desc-preproc_bold.nii.gz')
-                masking.unmask(data, ddict['mask']).to_filename(f_out)
+        if len(out) > 1:  # only do this is you have more than 1 run
+            for i, (data, _, _) in enumerate(out):
+                # maybe other name/desc (is the same as fmriprep output now)
+                if 'fs' in cfg['space']:
+                    f_out = op.join(out_dir, cfg['f_base'] + f'_run-{i+1}_desc-preproc_bold.npy')
+                    np.save(f_out, data)
+                else:
+                    f_out = op.join(out_dir, cfg['f_base'] + f'_run-{i+1}_desc-preproc_bold.nii.gz')
+                    masking.unmask(data, ddict['mask']).to_filename(f_out)
 
     # Concatenate data in time dimension
     data = np.vstack([d[0] for d in out])
@@ -86,6 +89,9 @@ def preprocess_funcs(ddict, cfg, logger):
     f_out = op.join(out_dir, cfg['f_base'] + '_desc-preproc_bold.npy')
     np.save(f_out, data)
     np.save(op.join(out_dir, 'run_idx.npy'), run_idx)
+
+    # Extract TRs
+    ddict['trs'] = [o[2] for o in out]
 
     # TO FIX: write out all data if there's no mask
     f_out = f_out.replace('bold.npy', 'mask.nii.gz')
@@ -124,7 +130,7 @@ def preprocess_confs(ddict, cfg, logger):
         data = data.fillna(0)
 
         # High-pass confounds
-        data = hp_filter(data.to_numpy(), ddict, cfg, logger)
+        data = hp_filter(data.to_numpy(), ddict['trs'][i], ddict, cfg, logger)
         
         # Perform PCA
         data = decomp.fit_transform(data)
@@ -145,9 +151,10 @@ def preprocess_confs(ddict, cfg, logger):
 
     out_dir = op.join(cfg['save_dir'], 'preproc')
     if cfg['save_all']:
-        for i, data in enumerate(data_):
-            f_out = op.join(out_dir, cfg['f_base'] + f'_run-{i+1}_desc-preproc_conf.tsv')
-            data.to_csv(f_out, sep='\t', index=False)
+        if len(data_) > 1:
+            for i, data in enumerate(data_):
+                f_out = op.join(out_dir, cfg['f_base'] + f'_run-{i+1}_desc-preproc_conf.tsv')
+                data.to_csv(f_out, sep='\t', index=False)
 
     # Concatenate DataFrames and save
     data = pd.concat(data_, axis=0)
@@ -193,9 +200,10 @@ def preprocess_events(ddict, cfg, logger):
 
     out_dir = op.join(cfg['save_dir'], 'preproc')
     if cfg['save_all']:
-        for i, data in enumerate(data_):
-            f_out = op.join(out_dir, cfg['f_base'] + f'_run-{i+1}_desc-preproc_events.tsv')
-            data.to_csv(f_out, sep='\t', index=False)
+        if len(data_) > 1:
+            for i, data in enumerate(data_):
+                f_out = op.join(out_dir, cfg['f_base'] + f'_run-{i+1}_desc-preproc_events.tsv')
+                data.to_csv(f_out, sep='\t', index=False)
 
     # Adjust onsets for concatenated events file
     #for run in np.unique(ddict['run_idx']).astype(int):
@@ -219,10 +227,9 @@ def preprocess_events(ddict, cfg, logger):
     return ddict
 
 
-def hp_filter(data, ddict, cfg, logger, standardize='zscore'):
+def hp_filter(data, tr, ddict, cfg, logger, standardize='zscore'):
     """ High-pass filter (DCT or Savitsky-Golay). """
     n_vol = data.shape[0]
-    tr = ddict['tr']
     st_ref = cfg['slice_time_ref']
     frame_times = np.linspace(st_ref * tr, n_vol * (tr + st_ref), n_vol, endpoint=False)
 

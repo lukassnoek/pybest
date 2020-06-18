@@ -69,6 +69,7 @@ def run_noise_processing(ddict, cfg, logger):
 
     # Pre-allocate clean func
     func_clean = ddict['preproc_func'].copy()
+    model = LinearRegression(fit_intercept=False, n_jobs=1)
     for run, r2s in enumerate(tqdm_ctm(r2s_list, tdesc('Denoising funcs: '))):
         
         # Compute maximum r2 across n-comps
@@ -77,14 +78,13 @@ def run_noise_processing(ddict, cfg, logger):
         opt_n_comps = n_comps[opt_n_comps_idx.astype(int)]
         opt_n_comps[r2_max < 0] = 0  # set negative r2 voxels to 0 comps
     
-        # Save (but maybe not necessary, given that denoising is done
-        # in this step, not in the signal model)
+        # Save for later (because we need to regress out these confounds
+        # from our trial-design-matrix as well)
         ddict['opt_noise_n_comps'][run, :] = opt_n_comps
 
         # Start denoising! Loop over unique indices
         func, conf, _ = get_run_data(ddict, run, func_type='preproc')
         nonzero = ~np.all(np.isclose(func, 0.), axis=0)
-        model = LinearRegression(fit_intercept=False, n_jobs=1)
         for this_n_comps in np.unique(opt_n_comps):
             # If n_comps is 0, then R2 was negative and we
             # don't want to denoise, so continue
@@ -109,10 +109,10 @@ def run_noise_processing(ddict, cfg, logger):
         if not op.isdir(out_dir):
             os.makedirs(out_dir)
 
-        if ses is None:
-            f_base = f'sub-{sub}_task-{task}_run-{run+1}_desc-'
+        if len(r2s_list) > 1:
+            f_base = cfg['f_base'] + f'_run-{run+1}_desc-'
         else:
-            f_base = f'sub-{sub}_ses-{ses}_task-{task}_run-{run+1}_desc-'
+            f_base = cfg['f_base'] + '_desc-'
 
         to_save = [  # This should always be saved
             (r2_max, 'max_r2'),
@@ -122,13 +122,16 @@ def run_noise_processing(ddict, cfg, logger):
 
         for dat, name in to_save:
             np.save(op.join(out_dir, f_base + name + '.npy'), dat)
-            if ddict['mask'] is not None:
+            if 'fs' not in cfg['space']:  # must be volumetric data
                 img = masking.unmask(dat, ddict['mask'])
                 img.to_filename(op.join(out_dir, f_base + name + '.nii.gz'))
         
         if cfg['save_all']:
-            img = masking.unmask(r2s, ddict['mask'])
-            img.to_filename(op.join(out_dir, f_base + 'ncomp_r2.nii.gz'))
+            if 'fs' not in cfg['space']:
+                img = masking.unmask(r2s, ddict['mask'])
+                img.to_filename(op.join(out_dir, f_base + 'ncomp_r2.nii.gz'))
+            else:
+                np.save(op.join(out_dir, f_base + 'ncomp_r2.npy'), r2s)
 
     f_out = op.join(out_dir, cfg['f_base'] + '_desc-denoised_bold.npy')
     np.save(f_out, func_clean)

@@ -28,7 +28,6 @@ from .constants import HRF_MODELS
 @click.option('--slice-time-ref', type=click.FLOAT, default=0.5, show_default=True)
 @click.option('--high-pass-type', type=click.Choice(['dct', 'savgol']), default='dct', show_default=True)
 @click.option('--high-pass', default=0.01, show_default=True)
-@click.option('--tr', default=None, type=click.FLOAT, show_default=True)
 @click.option('--decomp', default='pca', type=click.Choice(['pca', 'ica']), show_default=True)
 @click.option('--n-comps', default=100, type=click.INT, show_default=True)
 @click.option('--cv-repeats', default=2, type=click.INT, show_default=True)
@@ -44,7 +43,7 @@ from .constants import HRF_MODELS
 @click.option('--n-cpus', default=1, show_default=True)
 @click.option('--save-all', is_flag=True)
 def main(bids_dir, out_dir, fprep_dir, ricor_dir, subject, start_from, session, task, space, hemi,
-         gm_thresh, slice_time_ref, high_pass_type, high_pass, tr, decomp, n_comps, cv_repeats, cv_splits,
+         gm_thresh, slice_time_ref, high_pass_type, high_pass, decomp, n_comps, cv_repeats, cv_splits,
          skip_signalproc, single_trial_id, hrf_model, single_trial_noise_model, regularize_hrf_model, single_trial_model, pattern_units, uncorrelation,
          n_cpus, save_all):
     """ Main API of pybest. """
@@ -64,17 +63,18 @@ def main(bids_dir, out_dir, fprep_dir, ricor_dir, subject, start_from, session, 
 
             for task in cfg['task'][i][ii]:
                 if task is None:
-                    continue  # no data for this task in this run
+                    continue  # no data for this task in this session
 
-                to_add = '' if ses is None else f' ses-{ses} '
+                to_add = '' if ses is None else f' ses-{ses},'
                 logger.info(f"Starting process for sub-{sub},{to_add} task-{task}")
                 
                 # Some bookkeeping
-                if ses is None:
-                    cfg['f_base'] = f"sub-{sub}_task-{task}"
+                space_str = f'{space}_hemi-{hemi}' if 'fs' in space else space
+                if ses is None:  # no separate session output dir
+                    cfg['f_base'] = f"sub-{sub}_task-{task}_space-{space_str}"
                     cfg['save_dir'] = op.join(cfg['out_dir'], f'sub-{sub}')
                 else:
-                    cfg['f_base'] = f"sub-{sub}_ses-{ses}_task-{task}"
+                    cfg['f_base'] = f"sub-{sub}_ses-{ses}_task-{task}_space-{space_str}"
                     cfg['save_dir'] = op.join(cfg['out_dir'], f'sub-{sub}', f'ses-{ses}')
                 
                 if not op.isdir(cfg['out_dir']):
