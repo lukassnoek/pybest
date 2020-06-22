@@ -183,6 +183,9 @@ def _run_single_trial_model_parallel(run, best_hrf_idx, ddict, cfg, logger):
                     custom_contrast[this_vox_idx] = getattr(con, STATS[cfg['pattern_units']])()
         else:  # If not LSA, do LSS
             # Loop over single-trials
+            if len(st_names) == 0:
+                raise ValueError("Probably not wise to do LSS without single trials")
+
             for trial_nr, st_name in enumerate(st_names):
                 events_cp = events.copy()  # copy original events dataframe
                 # Set to-be-estimated trial to 'X', others to 'O', and create design matrix
