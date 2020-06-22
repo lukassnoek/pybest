@@ -6,31 +6,13 @@ import pandas as pd
 from tqdm import tqdm
 from nilearn import image, masking, signal
 from joblib import Parallel, delayed
-from scipy.signal import savgol_filter
-from nilearn.stats.first_level_model.design_matrix import _cosine_drift as dct_set
 from sklearn.decomposition import PCA, FastICA
+from sklearn.model_selection import cross_val_score, LeaveOneGroupOut
+from sklearn.linear_model import LinearRegression
 
 from .logging import tqdm_ctm, tdesc
-from .utils import _load_gifti
-
-
-def _run_func_parallel(ddict, cfg, run, func, logger):
-    
-    # Load data
-    if 'fs' in cfg['space']:  # assume gifti
-        data, tr = _load_gifti(func, return_tr=True)
-        tr /= 1000
-    else:
-        # Mask data and extract stuff
-        tr = nib.load(func).header['pixdim'][4]
-        data = masking.apply_mask(func, ddict['mask'])
-
-    # By now, data is a 2D array (time x voxels)
-    data = hp_filter(data, tr, ddict, cfg, logger)
-    
-    # Add to run index
-    run_idx = np.ones(data.shape[0]) * run
-    return data, run_idx, tr
+from .models import cross_val_r2
+from .utils import load_gifti, get_frame_times, create_design_matrix, hp_filter, save_data
 
 
 def preprocess_funcs(ddict, cfg, logger):
@@ -66,37 +48,20 @@ def preprocess_funcs(ddict, cfg, logger):
         for run, func in enumerate(tqdm_ctm(ddict['funcs'], tdesc('Preprocessing funcs:')))
     )
 
-    logger.info("Saving preprocessed data to disk")
-    out_dir = op.join(cfg['save_dir'], 'preproc')
-    if not op.isdir(out_dir):
-        os.makedirs(out_dir)
-
-    if cfg['save_all']:  # Save run-wise data as niftis for inspection
-        if len(out) > 1:  # only do this is you have more than 1 run
-            for i, (data, _, _) in enumerate(out):
-                # maybe other name/desc (is the same as fmriprep output now)
-                if 'fs' in cfg['space']:
-                    f_out = op.join(out_dir, cfg['f_base'] + f'_run-{i+1}_desc-preproc_bold.npy')
-                    np.save(f_out, data)
-                else:
-                    f_out = op.join(out_dir, cfg['f_base'] + f'_run-{i+1}_desc-preproc_bold.nii.gz')
-                    masking.unmask(data, ddict['mask']).to_filename(f_out)
-
     # Concatenate data in time dimension
     data = np.vstack([d[0] for d in out])
     run_idx = np.concatenate([r[1] for r in out]).astype(int)
 
-    f_out = op.join(out_dir, cfg['f_base'] + '_desc-preproc_bold.npy')
-    np.save(f_out, data)
+    save_data(data, cfg, ddict, par_dir='preproc', run=None, desc='preproc', dtype='bold')
+    out_dir = op.join(cfg['save_dir'], 'preproc')
     np.save(op.join(out_dir, 'run_idx.npy'), run_idx)
 
     # Extract TRs
     ddict['trs'] = [o[2] for o in out]
-
-    # TO FIX: write out all data if there's no mask
-    f_out = f_out.replace('bold.npy', 'mask.nii.gz')
-    if ddict['mask'] is not None:
-        ddict['mask'].to_filename(f_out)
+    logger.info(f"Found the following TRs across runs: {ddict['trs']}")
+    
+    # Save mask
+    save_data(ddict['mask'], cfg, ddict, par_dir='preproc', run=None, desc='preproc', dtype='mask')
 
     # Store in data-dictionary (ddict)
     ddict['preproc_func'] = data
@@ -104,7 +69,31 @@ def preprocess_funcs(ddict, cfg, logger):
     return ddict
 
 
-def preprocess_confs(ddict, cfg, logger):
+def _run_func_parallel(ddict, cfg, run, func, logger):
+    """ Parallelizes loading/hp-filtering of fMRI run. """
+    # Load data
+    if 'fs' in cfg['space']:  # assume gifti
+        data, tr = load_gifti(func, return_tr=True)
+        tr /= 1000  # defined in msec
+    else:
+        # Load/mask data and extract stuff
+        tr = nib.load(func).header['pixdim'][4]
+        data = masking.apply_mask(func, ddict['mask'])
+
+    # By now, data is a 2D array (time x voxels)
+    data = hp_filter(data, tr, ddict, cfg)
+    
+    # Add to run index
+    run_idx = np.ones(data.shape[0]) * run
+
+    if cfg['save_all']:  # Save run-wise data as niftis for inspection
+        save_data(data, cfg, ddict, par_dir='preproc', run=run+1,
+                  desc='preproc', dtype='bold', skip_if_single_run=True)
+
+    return data, run_idx, tr
+
+
+def preprocess_confs_fmriprep(ddict, cfg, logger):
     """ Preprocesses confounds by doing the following:
     1. Horizontal concatenation of Fmriprep confounds and RETROICOR (if any)
     2. Set NaNs to 0
@@ -130,7 +119,7 @@ def preprocess_confs(ddict, cfg, logger):
         data = data.fillna(0)
 
         # High-pass confounds
-        data = hp_filter(data.to_numpy(), ddict['trs'][i], ddict, cfg, logger)
+        data = hp_filter(data.to_numpy(), ddict['trs'][i], ddict, cfg)
         
         # Perform PCA
         data = decomp.fit_transform(data)
@@ -143,6 +132,9 @@ def preprocess_confs(ddict, cfg, logger):
 
         # Extract desired number of components
         data = data[:, :cfg['n_comps']]
+
+        # Apply HP filter again (not sure if necessary)
+        data = hp_filter(data, ddict['trs'][i], ddict, cfg)
 
         # Make proper dataframe
         cols = [f'decomp_{str(c+1).zfill(3)}' for c in range(data.shape[1])]
@@ -165,17 +157,108 @@ def preprocess_confs(ddict, cfg, logger):
     return ddict
 
 
+def preprocess_confs_noise_pool(ddict, cfg, logger):
+    """ GLMdenoise style. """
+    if np.unique(ddict['run_idx']).size < 2:
+        raise ValueError("Cannot cross-validate with fewer than 2 runs")
+
+    if cfg['hrf_model'] == 'kay':
+        r2 = np.zeros((20, ddict['preproc_func'].shape[1]))
+        to_iter = range(20)
+    else:
+        r2 = np.zeros((1, ddict['preproc_func'].shape[1]))
+        to_iter = range(1)
+    
+    # Use linear regression with leaven-one-run-out CV
+    model = LinearRegression(fit_intercept=False)
+    cv = LeaveOneGroupOut()
+    
+    logger.info(f"Starting noise pool estimation using {len(to_iter)} HRF(s)")
+
+    n_runs = np.unique(ddict['run_idx']).size
+    for i in to_iter:
+        Xs = []  # store runwise design matrix
+        for run in range(n_runs):
+            events = ddict['preproc_events'].query("run == (@run + 1)")
+            tr = ddict['trs'][run]
+            Y = ddict['preproc_func'][ddict['run_idx'] == run, :]
+            ft = get_frame_times(tr, ddict, cfg, Y)
+            X = create_design_matrix(tr, ft, events, hrf_model=cfg['hrf_model'], hrf_idx=i)
+            X = X.iloc[:, :-1]  # remove intercept
+            
+            # Filter and make sure mean is 0
+            X.loc[:, :] = hp_filter(X.to_numpy(), tr, ddict, cfg, standardize=False)
+            X = X - X.mean(axis=0)
+            Xs.append(X)
+
+        # Concatenate design matrices
+        X = pd.concat(Xs, axis=0).to_numpy()
+        Y = ddict['preproc_func']  # already high-pass filtered
+
+        # Cross-validation across runs + calculate noise pool
+        r2[i, :] = cross_val_r2(model, X, Y, cv=cv, groups=ddict['run_idx'])
+    
+    # Get best score (across HRFs, if any) for each voxel
+    r2_max = r2.max(axis=0)
+
+    # Noise voxels are those with r2 < 0 (no need for additional signal-based)
+    # threshold as in original GLMdenoise paper (because masked data)
+    noisepool_idx = r2_max < 0
+    logger.info(f"Noise pool has {noisepool_idx.sum()} voxels")
+
+    decomp = PCA() if cfg['decomp'] == 'pca' else FastICA(max_iter=1000)
+    cols = [f'decomp_{str(c+1).zfill(3)}' for c in range(cfg['n_comps'])] 
+    
+    # Do PCA per run
+    data_ = []
+    for i in range(n_runs):
+        t_idx = ddict['run_idx'] == i
+        Y = ddict['preproc_func'][t_idx, :]
+
+        # Fit/transform + select only n_comps variables        
+        data = decomp.fit_transform(Y[:, noisepool_idx])
+        data = data[:, :cfg['n_comps']]
+
+        # High-pass filter the confounds (again; not sure that's necessary)
+        # and store
+        data = hp_filter(data, ddict['trs'][i], ddict, cfg)
+        data = pd.DataFrame(data, columns=cols)
+        data_.append(data)
+
+    # Save data to disk
+    save_data(r2_max, cfg, ddict, par_dir='preproc', run=None, desc='max', dtype='r2')
+    save_data(r2_max, cfg, ddict, par_dir='preproc', run=None, desc='max', dtype='r2')
+    if r2.shape[0] > 1:  # also save R2 per HRF    
+        save_data(r2, cfg, ddict, par_dir='preproc', run=None, desc='hrf', dtype='r2')
+    
+    # Save some more stuff
+    if cfg['save_all']:
+        for run, data in enumerate(data_):
+            save_data(data, cfg, ddict, par_dir='preproc', run=run+1, desc='preproc',
+                      dtype='conf', ext='tsv', skip_if_single_run=True)
+
+    # Concatenate DataFrames and save
+    data = pd.concat(data_, axis=0)
+    save_data(data, cfg, ddict, par_dir='preproc', run=None, desc='preproc',
+              dtype='conf', ext='tsv')
+
+    ddict['preproc_conf'] = data
+
+    return ddict
+
+
 def preprocess_events(ddict, cfg, logger):
     """ Preprocesses event files. """
-    to_keep = ['onset', 'duration', 'trial_type']
+    
     data_ = []
     for i, event in enumerate(ddict['events']):
         data = pd.read_csv(event, sep='\t')
-        for col in to_keep:
+        
+        # Check if necessary columns are there
+        for col in ['onset', 'duration', 'trial_type']:  
             if col not in data.columns:
                 raise ValueError(f"No column '{col}' in {event}!")
 
-        #data = data.loc[:, to_keep]
         # Check negative onsets
         neg_idx = data['onset'] < 0
         if neg_idx.sum() > 0:
@@ -183,87 +266,79 @@ def preprocess_events(ddict, cfg, logger):
             data = data.loc[~neg_idx, :]
         
         # st = single trials
-        st_idx = data['trial_type'].str.contains(cfg['single_trial_id'])
-        n_st = data.loc[st_idx, :].shape[0]
-        
-        # Setting a unique trial-type for single trials
-        data.loc[st_idx, 'trial_type'] = [f'{str(i).zfill(3)}_{s}' for i, s in enumerate(data.loc[st_idx, 'trial_type'])]
+        if cfg['single_trial_id'] is not None:
+            st_idx = data['trial_type'].str.contains(cfg['single_trial_id'])
+            n_st = data.loc[st_idx, :].shape[0]
+            
+            # Setting a unique trial-type for single trials
+            data.loc[st_idx, 'trial_type'] = [f'{str(i).zfill(3)}_{s}' for i, s in enumerate(data.loc[st_idx, 'trial_type'])]
 
-        n_other = data.loc[~st_idx, 'trial_type'].unique().size        
-        logger.info(f"Found {n_st} single trials and {n_other} other conditions for run {i+1}")
-        
+            # Some bookkeeping (sorting and stuff)
+            n_other = data.loc[~st_idx, 'trial_type'].unique().size
+            sort_cols = ['onset', 'duration', 'trial_type', 'run']
+            other_cols = [col for col in data.columns if col not in sort_cols]
+            data = data.loc[:, sort_cols + other_cols]
+            logger.info(f"Found {n_st} single trials and {n_other} other conditions for run {i+1}")
+        else:
+            conds = data['trial_type'].unique()
+            logger.info(f"Found {conds.size} conditions for run {i+1}: {sorted(conds)}")
+
         data['run'] = i+1
-        sort_cols = ['onset', 'duration', 'trial_type', 'run']
-        other_cols = [col for col in data.columns if col not in sort_cols]
-        data = data.loc[:, sort_cols + other_cols]
+        first_cols = ['onset', 'duration', 'trial_type', 'run']
+        data = data.loc[:, first_cols + [c for c in data.columns if c not in first_cols]]
         data_.append(data)
 
+    # Save stuff
     out_dir = op.join(cfg['save_dir'], 'preproc')
     if cfg['save_all']:
-        if len(data_) > 1:
-            for i, data in enumerate(data_):
-                f_out = op.join(out_dir, cfg['f_base'] + f'_run-{i+1}_desc-preproc_events.tsv')
-                data.to_csv(f_out, sep='\t', index=False)
+        for run, data in enumerate(data_):
+            save_data(data, cfg, ddict, par_dir='preproc', run=run+1, desc='preproc',
+                      dtype='events', ext='tsv', skip_if_single_run=True)
 
     # Adjust onsets for concatenated events file
     #for run in np.unique(ddict['run_idx']).astype(int):
     #    prev_run = ddict['run_idx'] < run
     #    data_[run].loc[:, 'onset'] = data_[run].loc[:, 'onset'] + prev_run.sum() * ddict['tr']
 
-    data = pd.concat(data_, axis=0, sort=True)
-    f_out = op.join(out_dir, cfg['f_base'] + '_desc-preproc_events.tsv')
-    data.to_csv(f_out, sep='\t', index=False)
-    
-    st_idx = data['trial_type'].str.contains(cfg['single_trial_id'])
-    n_st = data.loc[st_idx, :].shape[0]
-    other = data.loc[~st_idx, 'trial_type'].unique().tolist()
-    n_other = len(other)
+    # Concatenate events into one big DataFrame + save
+    data = pd.concat(data_, axis=0)
+    save_data(data, cfg, ddict, par_dir='preproc', run=None, desc='preproc', dtype='events', ext='tsv')
 
-    logger.info(
-        f"Found {data.shape[0]} events across {i+1} runs, of which "
-        f"{n_st} single trials + {n_other} other conditions {other}"
-    )
+    # Print some useful info about single-trials
+    if cfg['single_trial_id'] is not None: 
+        st_idx = data['trial_type'].str.contains(cfg['single_trial_id'])
+        n_st = data.loc[st_idx, :].shape[0]
+        other = data.loc[~st_idx, 'trial_type'].unique().tolist()
+        n_other = len(other)
+        logger.info(
+            f"Found {data.shape[0]} events across {i+1} runs, of which "
+            f"{n_st} single trials + {n_other} other conditions {other}"
+        )
     ddict['preproc_events'] = data
     return ddict
 
 
-def hp_filter(data, tr, ddict, cfg, logger, standardize='zscore'):
-    """ High-pass filter (DCT or Savitsky-Golay). """
-    n_vol = data.shape[0]
-    st_ref = cfg['slice_time_ref']
-    frame_times = np.linspace(st_ref * tr, n_vol * (tr + st_ref), n_vol, endpoint=False)
-
-    # Create high-pass filter and clean
-    if cfg['high_pass_type'] == 'dct':
-        hp_set = dct_set(cfg['high_pass'], frame_times)
-        data = signal.clean(data, detrend=False, standardize=standardize, confounds=hp_set)
-    else:  # savgol, hardcode polyorder
-        window = int(np.round((1 / cfg['high_pass']) / tr))
-        data -= savgol_filter(data, window_length=window, polyorder=2, axis=0)
-        if standardize:
-            data = signal.clean(data, detrend=False, standardize=standardize)
-
-    return data
-
-
 def load_preproc_data(ddict, cfg):
     """ Loads preprocessed data. """
-    sub, ses, task = cfg['c_sub'], cfg['c_ses'], cfg['c_task']
     in_dir = op.join(cfg['save_dir'], 'preproc')
-    if ses is None:
-        f_base = f'sub-{sub}_task-{task}_desc-preproc_'
-    else:
-        f_base = f'sub-{sub}_ses-{ses}_task-{task}_desc-preproc_'
-    
+    f_base = cfg['f_base'] + '_desc-preproc_'
+
     f_in = op.join(in_dir, f_base)
-    ddict['preproc_func'] = np.load(f_in + 'bold.npy')
+    ddict['mask'] = None if 'fs' in cfg['space'] else nib.load(f_in + 'mask.nii.gz')
+
+    if 'fs' in cfg['space']:
+        ddict['preproc_func'] = np.load(f_in + f'bold.npy')
+        ddict['trs'] = [load_gifti(f)[1] for f in ddict['funcs']]
+    else:
+        ddict['preproc_func'] = masking.apply_mask(f_in + 'bold.nii.gz', ddict['mask'])
+        ddict['trs'] = [nib.load(f).header['pixdim'][4] for f in ddict['funcs']]
+
     ddict['preproc_conf'] = pd.read_csv(f_in + 'conf.tsv', sep='\t')
     if not cfg['skip_signalproc']:
         ddict['preproc_events'] = pd.read_csv(f_in + 'events.tsv', sep='\t')
     else:
         ddict['preproc_events'] = None
 
-    ddict['mask'] = None if 'fs' in cfg['space'] else nib.load(f_in + 'mask.nii.gz')
     ddict['run_idx'] = np.load(op.join(in_dir, 'run_idx.npy'))
-
+    
     return ddict

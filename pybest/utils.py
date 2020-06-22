@@ -1,244 +1,26 @@
-import io
 import os
 import click
 import os.path as op
 import numpy as np
 import nibabel as nib
+import pandas as pd
 from tqdm import tqdm
 from glob import glob
-from nilearn import plotting, signal
+from scipy.interpolate import interp1d
+from scipy.signal import savgol_filter
+from nilearn import plotting, signal, masking
 from nilearn.datasets import fetch_surf_fsaverage
 from nilearn.stats.first_level_model import run_glm
 from sklearn.linear_model import LinearRegression
+from nilearn.glm.first_level.experimental_paradigm import check_events
+from nilearn.glm.first_level.design_matrix import make_first_level_design_matrix
+from nilearn.glm.first_level.hemodynamic_models import _sample_condition, _resample_regressor
+from nilearn.glm.first_level.design_matrix import _cosine_drift as dct_set
+
+from .constants import HRFS_HR
 
 
-def check_parameters(cfg, logger):
-    """ Checks parameter settings and raises errors in case of
-    incompatible parameters. """
-
-    if cfg['single_trial_id'] is None:
-        logger.warn("No single-trial-id found; skipping signalproc!")
-        cfg['skip_signalproc'] = True
-
-    if cfg['uncorrelation'] and cfg['single_trial_model'] == 'lss':
-        raise ValueError("Cannot use uncorrelation in combination with LSS.")
-
-
-def set_defaults(cfg, logger):
-    """ Sets default inputs. """
-    if not op.isdir(cfg['bids_dir']):
-        raise ValueError(f"BIDS directory {cfg['bids_dir']} does not exist!")
-
-    logger.info(f"Using BIDS directory {cfg['bids_dir']}")
-
-    if cfg['out_dir'] is None:  # Set default out_dir
-        cfg['out_dir'] = op.join(cfg['bids_dir'], 'derivatives', 'pybest')
-        if not op.isdir(cfg['out_dir']):
-            os.makedirs(cfg['out_dir'], exist_ok=True)
-
-        logger.info(f"Setting output directory to {cfg['out_dir']}")
-
-    if cfg['fprep_dir'] is None:
-        cfg['fprep_dir'] = op.join(cfg['bids_dir'], 'derivatives', 'fmriprep')
-        logger.info(f"Setting Fmriprep directory to {cfg['fprep_dir']}")
-
-        if not op.isdir(cfg['fprep_dir']):
-            raise ValueError(
-                f"Fmriprep directory {cfg['fprep_dir']} does not exist.")
-
-    if cfg['ricor_dir'] is None:
-        cfg['ricor_dir'] = op.join(
-            cfg['bids_dir'], 'derivatives', 'physiology')
-        if not op.isdir(cfg['ricor_dir']):
-            cfg['ricor_dir'] = None
-            logger.info("No RETROICOR directory, so assuming no physio data.")
-    else:
-        logger.info(f"Setting RETROICOR directory to {cfg['ricor_dir']}")
-
-    if cfg['session'] is None:
-        logger.warning(
-            f"No session identifier given; assuming a single session.")
-
-    if cfg['gm_thresh'] == 0:
-        cfg['gm_thresh'] = None
-
-    if not cfg['subject']:
-        cfg['subject'] = None
-
-    return cfg
-
-
-def find_exp_parameters(cfg, logger):
-    """ Extracts experimental parameters. """
-
-    hemi, space = cfg['hemi'], cfg['space']
-    space_idf = f'hemi-{hemi}.func.gii' if 'fs' in space else 'desc-preproc_bold.nii.gz'
-
-    # Use all possible participants if not provided
-    if cfg['subject'] is None:
-        cfg['subject'] = [
-            op.basename(s).split('-')[1] for s in
-            sorted(glob(op.join(cfg['fprep_dir'], 'sub-*')))
-            if op.isdir(s)
-        ]
-        logger.info(
-            f"Found {len(cfg['subject'])} participant(s) {cfg['subject']}")
-    else:
-        # Use a list by default
-        cfg['subject'] = [cfg['subject']]
-
-    # Use all sessions if not provided
-    if cfg['session'] is None:
-        cfg['session'] = []
-        for this_sub in cfg['subject']:
-            these_ses = [
-                op.basename(s).split('-')[1] for s in
-                sorted(
-                    glob(op.join(cfg['fprep_dir'], f'sub-{this_sub}', 'ses-*')))
-                if op.isdir(s)
-            ]
-            logger.info(
-                f"Found {len(these_ses)} session(s) for sub-{this_sub} {these_ses}")
-            these_ses = [None] if not these_ses else these_ses
-            cfg['session'].append(these_ses)
-    else:
-        cfg['session'] = [cfg['session']] * len(cfg['subject'])
-
-    # Use all tasks if no explicit task is provided
-    if cfg['task'] is None:
-        cfg['task'] = []
-        for this_sub, these_ses in zip(cfg['subject'], cfg['session']):
-            these_task = []
-            for this_ses in these_ses:
-                if this_ses is None:  # only single session!
-                    tmp = glob(op.join(
-                        cfg['fprep_dir'],
-                        f'sub-{this_sub}',
-                        'func',
-                        f"*space-{cfg['space']}*_{space_idf}"
-                    ))
-                else:
-                    tmp = glob(op.join(
-                        cfg['fprep_dir'],
-                        f'sub-{this_sub}',
-                        f'ses-{this_ses}',
-                        'func',
-                        f"*space-{cfg['space']}*_{space_idf}"
-                    ))
-
-                these_ses_task = list(set(
-                    [op.basename(f).split('task-')[1].split('_')[0]
-                     for f in tmp]
-                ))
-
-                these_task.append(these_ses_task)
-
-                to_add = "" if this_ses is None else f"and ses-{this_ses}"
-                msg = f"Found {len(these_ses_task)} task(s) for sub-{this_sub} {to_add} {these_ses_task}"
-
-                logger.info(msg)
-
-            cfg['task'].append(these_task)
-    else:
-        all_ses_tasks = []
-        for this_sub, these_ses in zip(cfg['subject'], cfg['session']):
-            these_task = []
-            for this_ses in these_ses:
-                if this_ses is None:
-                    tmp = glob(op.join(
-                        cfg['fprep_dir'],
-                        f'sub-{this_sub}',
-                        'func',
-                        f"*task-{cfg['task']}*_space-{cfg['space']}*_{space_idf}"
-                    ))
-                else:
-                    tmp = glob(op.join(
-                        cfg['fprep_dir'],
-                        f'sub-{this_sub}',
-                        f'ses-{this_ses}',
-                        'func',
-                        f"*task-{cfg['task']}*_space-{cfg['space']}*_{space_idf}"
-                    ))
-                if tmp:
-                    these_task.append([cfg['task']])
-                else:
-                    these_task.append([None])
-            all_ses_tasks.append(these_task)
-
-        cfg['task'] = all_ses_tasks
-
-    return cfg
-
-
-def find_data(cfg, logger):
-    """ Finds all data for a given subject/session/task/space/hemi. """
-    # Set right "identifier" depending on fsaverage* or volumetric space
-    sub, ses, task, hemi, space = cfg['c_sub'], cfg['c_ses'], cfg['c_task'], cfg['hemi'], cfg['space']
-    space_idf = f'hemi-{hemi}.func.gii' if 'fs' in space else 'desc-preproc_bold.nii.gz'
-
-    # Gather funcs, confs, tasks
-    fprep_dir = cfg['fprep_dir']
-    if cfg['c_ses'] is None:
-        ffunc_dir = op.join(fprep_dir, f'sub-{sub}', 'func')
-    else:
-        ffunc_dir = op.join(fprep_dir, f'sub-{sub}', f'ses-{ses}', 'func')
-
-    funcs = sorted(
-        glob(op.join(ffunc_dir, f'*task-{task}*_space-{space}_{space_idf}')))
-    confs = sorted(
-        glob(op.join(ffunc_dir, f'*task-{task}*_desc-confounds_regressors.tsv')))
-
-    bids_dir = cfg['bids_dir']
-    if cfg['c_ses'] is None:
-        bfunc_dir = op.join(bids_dir, f'sub-{sub}', 'func')
-    else:
-        bfunc_dir = op.join(bids_dir, f'sub-{sub}', f'ses-{ses}', 'func')
-
-    events = sorted(glob(op.join(bfunc_dir, f'*task-{task}*_events.tsv')))
-
-    if len(events) == 0:
-        logger.warning(
-            "Did not find event files! Going to assume there's no task involved.")
-        events = None
-        to_check = [confs]
-    else:
-        to_check = [confs, events]
-
-    if not all(len(funcs) == len(tmp) for tmp in to_check):
-        msg = f"Found unequal number of funcs ({len(funcs)}) and confs ({len(confs)})"
-        if events is not None:
-            msg += f" and events ({len(events)})"
-
-        raise ValueError(msg)
-
-    logger.info(f"Found {len(funcs)} runs for task {task}")
-
-    # Also find retroicor files
-    ricor_dir = cfg['ricor_dir']
-    if ricor_dir is not None:
-        ricors = sorted(glob(op.join(
-            ricor_dir, f'sub-{sub}', f'ses-{ses}', 'physio', f'*task-{task}_*_regressors.tsv'
-        )))
-        logger.info(f"Found {len(ricors)} RETROICOR files for task {task}")
-    else:
-        ricors = None
-
-    if 'fs' not in space and cfg['gm_thresh'] is not None:  # volumetric files
-        space_idf = '' if space == 'T1w' else f'_space-{space}'
-        fname = f'sub-{sub}{space_idf}_label-GM_probseg.nii.gz'
-        gm_prob = op.join(fprep_dir, f'sub-{sub}', 'anat', fname)
-    else:
-        gm_prob = None
-
-    ddict = dict(
-        funcs=funcs, confs=confs, events=events,
-        ricors=ricors, gm_prob=gm_prob
-    )
-
-    return ddict
-
-
-def _load_gifti(f, return_tr=False):
+def load_gifti(f, return_tr=True):
     """ Load gifti array. """
     f_gif = nib.load(f)
     data = np.vstack([arr.data for arr in f_gif.darrays])
@@ -249,14 +31,89 @@ def _load_gifti(f, return_tr=False):
         return data
 
 
-def get_frame_times(ddict, cfg, Y):
+def save_data(data, cfg, ddict, par_dir, run, desc, dtype, ext=None, skip_if_single_run=False):
+    """ Saves data as either numpy files (for fs* space data) or
+    gzipped nifti (.nii.gz; for volumetric data).
+
+    Parameters
+    ----------
+    data : np.ndarray
+        Either a 1D (voxels,) or 2D (observations x voxels) array
+    cfg : dict
+        Config dictionary
+    par_dir : str
+        Name of parent directory ('preproc', 'denoising', 'best')
+    run : int/None
+        Run index (if None, assumed to be a single run)
+    desc : str
+        Description string (desc-{desc})
+    dtype : str
+        Type of data (_{dtype}.{npy,nii.gz})
+    ext : str
+        Extension (to determine how to save the data). If None, assuming
+        fMRI data.
+    """
+    
+    if data is None:
+        return None
+
+    if skip_if_single_run:
+        if len(ddict['funcs']) == 1:
+            return None
+
+    save_dir = op.join(cfg['save_dir'], par_dir)
+    if not op.isdir(save_dir):
+        os.makedirs(save_dir)
+
+    if run is None:
+        f_out = op.join(save_dir, cfg['f_base'] + f'_desc-{desc}_{dtype}')
+    else:
+        f_out = op.join(save_dir, cfg['f_base'] + f'_run-{run}_desc-{desc}_{dtype}')
+
+    if ext == 'tsv':
+        data.to_csv(f_out + '.tsv', sep='\t')
+        return None
+
+    if 'fs' in cfg['space']:  # surface
+        np.save(f_out + '.npy', data)
+    else:  # volume
+        if isinstance(data, nib.Nifti1Image):
+            data.to_filename(f_out + '.nii.gz')
+        else:
+            masking.unmask(data, ddict['mask']).to_filename(f_out + '.nii.gz')
+
+
+def hp_filter(data, tr, ddict, cfg, standardize=True):
+    """ High-pass filter (DCT or Savitsky-Golay). """
+
+    n_vol = data.shape[0]
+    st_ref = cfg['slice_time_ref']
+    ft = np.linspace(st_ref * tr, n_vol * (tr + st_ref), n_vol, endpoint=False)
+
+    # Create high-pass filter and clean
+    if cfg['high_pass_type'] == 'dct':
+        hp_set = dct_set(cfg['high_pass'], ft)
+        data = signal.clean(data, detrend=False, standardize=standardize, confounds=hp_set)
+    else:  # savgol, hardcode polyorder
+        window = int(np.round((1 / cfg['high_pass']) / tr))
+        data -= savgol_filter(data, window_length=window, polyorder=2, axis=0)
+        if standardize:
+            data = signal.clean(data, detrend=False, standardize=standardize)
+
+    return data
+
+
+def get_frame_times(tr, ddict, cfg, Y):
     """ Computes frame times for a particular time series (and TR). """
-    tr = ddict['tr']
     n_vol = Y.shape[0]
     st_ref = cfg['slice_time_ref']
-    ft = np.linspace(st_ref * tr, n_vol * tr +
-                     st_ref * tr, n_vol, endpoint=False)
-    return ft
+    frame_times = np.linspace(
+        st_ref * tr,
+        n_vol * tr + st_ref * tr,
+        n_vol,
+        endpoint=False
+    )
+    return frame_times
 
 
 def get_param_from_glm(name, labels, results, dm, time_series=False, predictors=False):
@@ -275,6 +132,149 @@ def get_param_from_glm(name, labels, results, dm, time_series=False, predictors=
         data[..., labels == lab] = getattr(results[lab], name)
 
     return data
+
+
+def create_design_matrix(tr, frame_times, events, hrf_model='kay', hrf_idx=None):
+    """ Creates a design matrix based on a HRF from Kendrick Kay's set
+    or a default one from Nistats. """
+    
+    # This is to keep oversampling consistent across hrf_models
+    hrf_oversampling = 10
+    design_oversampling = tr / (0.1 / hrf_oversampling)
+
+    if hrf_model != 'kay':  # just use Nilearn
+        return make_first_level_design_matrix(
+            frame_times, events, drift_model=None, min_onset=0,
+            oversampling=design_oversampling, hrf_model=hrf_model
+        )
+
+    if hrf_model == 'kay':
+        
+        if hrf_idx is None:  # 20 different DMs (based on different HRFs)
+            to_iter = range(HRFS_HR.shape[1])
+        else:
+            to_iter = [hrf_idx]
+
+        # dms will store all design matrices
+        dms = []
+        for hrf_idx in to_iter:
+            hrf = HRFS_HR[:, hrf_idx]
+            
+            # To match the design oversampling, do it relative to tr
+            trial_type, onset, duration, modulation = check_events(events)
+
+            # Pre-allocate design matrix; note: columns are alphabetically sorted
+            X = np.zeros((frame_times.size, np.unique(trial_type).size))
+            uniq_trial_types = np.unique(trial_type)
+
+            # Create separate regressor for each unique trial type
+            for i, condition in enumerate(uniq_trial_types):
+                condition_mask = (trial_type == condition)
+                exp_condition = (
+                    onset[condition_mask],
+                    duration[condition_mask],
+                    modulation[condition_mask]
+                )
+                # Create high resolution regressor/frame times
+                hr_regressor, hr_frame_times = _sample_condition(
+                    exp_condition, frame_times, design_oversampling, 0
+                )
+                
+                # Convolve with HRF and downsample
+                conv_reg = np.convolve(hr_regressor, hrf)[:hr_regressor.size]
+                f = interp1d(hr_frame_times, conv_reg)
+                X[:, i] = f(frame_times).T
+            
+            X /= X.max(axis=0)  # rescale to max = 1
+            dm = pd.DataFrame(X, columns=uniq_trial_types, index=frame_times)
+            dm['constant'] = 1  # and intercept/constant
+            dms.append(dm)
+
+        if len(dms) == 1:
+            # Just return single design matrix
+            dms = dms[0]
+
+        return dms 
+
+
+def get_run_data(ddict, run, func_type='preproc'):
+    """ Get the data for a specific run. """
+    
+    t_idx = ddict['run_idx'] == run  # timepoint index
+    func = ddict[f'{func_type}_func'][t_idx, :].copy()
+    conf = ddict['preproc_conf'].copy().loc[t_idx, :].to_numpy()
+    
+    if ddict['preproc_events'] is not None:
+        events = ddict['preproc_events'].copy().query("run == (@run + 1)")
+    else:
+        events = None
+    
+    return func, conf, events
+
+
+def yield_glm_results(vox_idx, Y, X, conf, run, ddict, cfg):
+
+    tr = ddict['trs'][run]
+    opt_n_comps = ddict['opt_n_comps'][run, :].astype(int)
+    nm = cfg['single_trial_noise_model']
+    for this_n_comps in np.unique(opt_n_comps):  # loop across unique n comps
+        # If n_comps is 0, then R2 was negative and we
+        # don't want to denoise, so continue
+        if this_n_comps == 0:
+            continue
+
+        # Find voxels that correspond to this_n_comps and intersect
+        # with given voxel index
+        this_vox_idx = opt_n_comps == this_n_comps
+        this_vox_idx = np.logical_and(vox_idx, this_vox_idx)
+
+        # Get confound matrix (X_n) and remove from design (this_X)
+        C = conf[:, :this_n_comps]
+        this_X = X.copy()
+        if 'constant' in this_X.columns:
+            X = X.drop('constant', axis=1)
+        
+        this_X.loc[:, :], Y = custom_clean(this_X, Y, C, tr, ddict, cfg, standardize=True)
+
+        # Set max to 1 (not sure whether I should actually do this)
+        this_X.iloc[:, :-1] = this_X.iloc[:, :-1] / \
+            this_X.iloc[:, :-1].max(axis=0)
+
+        
+        # Refit model on all data this time and remove fitted values
+        labels, results = run_glm(Y[:, this_vox_idx], this_X.to_numpy(), noise_model=nm)
+        yield this_vox_idx, this_X, labels, results
+
+
+def custom_clean(X, Y, C, tr, ddict, cfg, high_pass=True, clean_Y=True, standardize=True):
+    """ High-passes (optional) and removes confounds (C) from both
+    design matrix (X) and data (Y).
+
+    Parameters
+    ----------
+    X : pd.DataFrame
+        Dataframe with design (timepoints x conditions)
+    Y : np.ndarray
+        2D numpy array (timepoints x voxels)
+    C : pd.DataFrame
+        Dataframe with confounds (timepoints x confound variables)
+    high_pass : bool
+        Whether to high-pass the data or not
+    """
+
+    if 'constant' in X.columns:
+        X = X.drop('constant', axis=1)
+
+    if high_pass:
+        # Note to self: Y and C are already high-pass filtered
+        X.loc[:, :] = hp_filter(X.to_numpy(), tr, ddict, cfg, standardize=False)
+    
+    X.loc[:, :] = signal.clean(X.to_numpy(), detrend=False, standardize=False)
+    X = X - X.mean(axis=0)
+    if clean_Y:
+        Y = signal.clean(Y, detrend=False, confounds=C, standardize=standardize)
+
+    return X, Y
 
 
 @click.command()
@@ -330,7 +330,7 @@ def view_surf(file, hemi, space, fs_dir, threshold, idx):
         bg = fs[f"sulc_{hemi}"]
 
     dat = np.load(file)
-    if idx is not None:
+    if idx is not None:  # select volume
         dat = dat[idx, :]
     
     if dat.ndim > 1:
@@ -343,46 +343,3 @@ def view_surf(file, hemi, space, fs_dir, threshold, idx):
         threshold=threshold
     )
     display.open_in_browser()
-
-
-def get_run_data(ddict, run, func_type='preproc'):
-    """ Get the data for a specific run. """
-    t_idx = ddict['run_idx'] == run  # timepoint index
-    func = ddict[f'{func_type}_func'][t_idx, :].copy()
-    conf = ddict['preproc_conf'].copy().loc[t_idx, :].to_numpy()
-    if ddict['preproc_events'] is not None:
-        events = ddict['preproc_events'].copy().query("run == (@run + 1)")
-    else:
-        events = None
-    # I think we need an explicit copy here (not sure)
-    return func, conf, events
-
-
-def yield_glm_results(vox_idx, Y, X, conf, run, ddict, cfg, noise_model='ols'):
-    model = LinearRegression(fit_intercept=False)
-    opt_n_comps = ddict['opt_noise_n_comps'][run, :]
-    for this_n_comps in np.unique(opt_n_comps):  # loop across unique n comps
-        # If n_comps is 0, then R2 was negative and we
-        # don't want to denoise, so continue
-        if this_n_comps == 0:
-            continue
-
-        # Find voxels that correspond to this_n_comps and intersect
-        # with given voxel index
-        this_vox_idx = opt_n_comps == this_n_comps
-        this_vox_idx = np.logical_and(vox_idx, this_vox_idx)
-
-        # Get confound matrix (X_n) and remove from design (this_X)
-        X_n = conf[:, :this_n_comps]
-        this_X = X.copy()
-        this_X.iloc[:, :] = this_X.to_numpy() - model.fit(X_n,
-                                                          this_X.to_numpy()).predict(X_n)
-
-        # Set max to 1 (not sure whether I should actually do this)
-        this_X.iloc[:, :-1] = this_X.iloc[:, :-1] / \
-            this_X.iloc[:, :-1].max(axis=0)
-
-        # Refit model on all data this time and remove fitted values
-        labels, results = run_glm(
-            Y[:, this_vox_idx], this_X.to_numpy(), noise_model=noise_model)
-        yield this_vox_idx, this_X, labels, results
