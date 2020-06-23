@@ -71,7 +71,7 @@ def save_data(data, cfg, ddict, par_dir, run, desc, dtype, ext=None, skip_if_sin
         f_out = op.join(save_dir, cfg['f_base'] + f'_run-{run}_desc-{desc}_{dtype}')
 
     if ext == 'tsv':
-        data.to_csv(f_out + '.tsv', sep='\t')
+        data.to_csv(f_out + '.tsv', sep='\t', index=False)
         return None
 
     if 'fs' in cfg['space']:  # surface

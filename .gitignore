@@ -130,7 +130,7 @@ dmypy.json
 
 # Custom
 pybest/data/PIOP1
-pybest/data/FEED
+pybest/data/FEED*
 pybest/data/ni-edu
 pybest/data/*.tar.gz
 **/.vscode

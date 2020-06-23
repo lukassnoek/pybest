@@ -37,11 +37,13 @@ def run_noise_processing(ddict, cfg, logger):
     logger.info(f"Starting denoising with {cfg['n_comps']} components")
 
     # Some parameters
-    n_comps = np.arange(1, cfg['n_comps']+1).astype(int)  # range of components to test
     n_runs = np.unique(ddict['run_idx']).size
     K = ddict['preproc_func'].shape[1]  # voxels
 
     if cfg['signalproc_type'] == 'single-trial':
+        # Must be > 0
+        n_comps = np.arange(1, cfg['n_comps']+1).astype(int)  # range of components to test
+    
         # Denoising is done within runs!
         # Maybe add a "meta-seed" to cli options to ensure reproducibility?
         seed = np.random.randint(10e5)
@@ -72,6 +74,8 @@ def run_noise_processing(ddict, cfg, logger):
                     save_data(data, cfg, ddict, par_dir='denoising', run=None, desc=desc, dtype=dtype)
 
     else:  # Fit GLMdenoise-style models
+        n_comps = np.arange(0, cfg['n_comps']+1).astype(int)  # range of components to test
+    
         # Initialize R2 array (across HRFs/n-components/voxels)
         cv = LeaveOneGroupOut()
         r2s_list = Parallel(n_jobs=cfg['n_cpus'])(delayed(_run_parallel_across_runs)(
@@ -89,13 +93,13 @@ def run_noise_processing(ddict, cfg, logger):
         r2_max = r2_ncomps.max(axis=0)
 
         # Find optimal number of components and HRF index
-        opt_n_comps = n_comps[r2_ncomps.argmax(axis=0).stype(int)]
+        opt_n_comps = n_comps[r2_ncomps.argmax(axis=0).astype(int)]
         opt_n_comps[r2_max < 0] = 0
         opt_hrf_idx = np.zeros(K)
 
         for i in n_comps:
             idx = opt_n_comps == i
-            opt_hrf_idx[idx] = r2[:, i-1, idx].argmax(axis=0)
+            opt_hrf_idx[idx] = r2[:, i, idx].argmax(axis=0)
 
         # Always save the following:
         save_data(opt_hrf_idx, cfg, ddict, par_dir='denoising', run=None, desc='opt', dtype='hrf')
@@ -193,28 +197,32 @@ def _run_parallel_across_runs(ddict, cfg, logger, this_n_comp, cv):
     model = LinearRegression(fit_intercept=False)
     # Define fMRI data (Y) and full confound matrix (C)
     Y = ddict['preproc_func'].copy()
-    C = ddict['preproc_conf'].iloc[:, :this_n_comp].to_numpy()
-    
+
     # Loop over HRFs
     for i in to_iter:
         Xs = []  # store runwise design matrix
         # Create run-wise design matrix
         for run in range(n_runs):
             t_idx = ddict['run_idx'] == run
-            events = ddict['preproc_events'].query("run == (@run + 1)")
+            this_Y, conf, events = get_run_data(ddict, run=run, func_type='preproc')
+            C = conf[:, :this_n_comp]
             tr = ddict['trs'][run]
-            ft = get_frame_times(tr, ddict, cfg, Y[t_idx, :])
+            ft = get_frame_times(tr, ddict, cfg, this_Y)
+            
             X = create_design_matrix(tr, ft, events, hrf_model=cfg['hrf_model'], hrf_idx=i)
-            X = X.iloc[:, :-1]  # remove intercept
+            X = X.drop('constant', axis=1)
             
             # Filter and remove confounds (C) from both the design matrix (X) and data (Y)
-            X.loc[:, :], _ = custom_clean(X, Y, C, tr, ddict, cfg, clean_Y=False)
+            if this_n_comp != 0:
+                X.loc[:, :], this_Y = custom_clean(X, this_Y, C, tr, ddict, cfg, clean_Y=True)
+    
             X = X - X.mean(axis=0)
             Xs.append(X)
+            Y[t_idx, :] = this_Y
 
         # Concatenate across runs
         X = pd.concat(Xs, axis=0).to_numpy()
-        Y = signal.clean(Y, detrend=False, standardize='zscore', confounds=C)
+        Y = signal.clean(Y, detrend=False, standardize='zscore')
 
         # Cross-validation across runs
         r2[i, :] = cross_val_r2(model, X, Y, cv=cv, groups=ddict['run_idx'])
@@ -224,7 +232,6 @@ def _run_parallel_across_runs(ddict, cfg, logger, this_n_comp, cv):
 
 def load_denoising_data(ddict, cfg):
     """ Loads the denoising parameters/data. """
-
     f_base = cfg['f_base']
     preproc_dir = op.join(cfg['save_dir'], 'preproc')
     denoising_dir = op.join(cfg['save_dir'], 'denoising')
@@ -251,6 +258,5 @@ def load_denoising_data(ddict, cfg):
         ddict['preproc_events'] = None
     
     ddict['run_idx'] = np.load(op.join(preproc_dir, 'run_idx.npy'))
-
     return ddict
 

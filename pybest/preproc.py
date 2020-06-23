@@ -143,13 +143,12 @@ def preprocess_confs_fmriprep(ddict, cfg, logger):
 
     out_dir = op.join(cfg['save_dir'], 'preproc')
     if cfg['save_all']:
-        if len(data_) > 1:
-            for i, data in enumerate(data_):
-                f_out = op.join(out_dir, cfg['f_base'] + f'_run-{i+1}_desc-preproc_conf.tsv')
-                data.to_csv(f_out, sep='\t', index=False)
+        for i, data in enumerate(data_):
+            f_out = op.join(out_dir, cfg['f_base'] + f'_run-{i+1}_desc-preproc_conf.tsv')
+            data.to_csv(f_out, sep='\t', index=False)
 
     # Concatenate DataFrames and save
-    data = pd.concat(data_, axis=0)
+    data = pd.concat(data_, axis=0, sort=True)
     f_out = op.join(out_dir, cfg['f_base'] + '_desc-preproc_conf.tsv')
     data.to_csv(f_out, sep='\t', index=False)
 
@@ -281,7 +280,8 @@ def preprocess_events(ddict, cfg, logger):
             logger.info(f"Found {n_st} single trials and {n_other} other conditions for run {i+1}")
         else:
             conds = data['trial_type'].unique()
-            logger.info(f"Found {conds.size} conditions for run {i+1}: {sorted(conds)}")
+            to_print = sorted(conds) if len(conds) < 10 else sorted(conds)[:10]
+            logger.info(f"Found {conds.size} conditions for run {i+1}: {to_print}")
 
         data['run'] = i+1
         first_cols = ['onset', 'duration', 'trial_type', 'run']
@@ -289,7 +289,6 @@ def preprocess_events(ddict, cfg, logger):
         data_.append(data)
 
     # Save stuff
-    out_dir = op.join(cfg['save_dir'], 'preproc')
     if cfg['save_all']:
         for run, data in enumerate(data_):
             save_data(data, cfg, ddict, par_dir='preproc', run=run+1, desc='preproc',
@@ -302,6 +301,23 @@ def preprocess_events(ddict, cfg, logger):
 
     # Concatenate events into one big DataFrame + save
     data = pd.concat(data_, axis=0)
+    data.index = range(data.shape[0])
+    if data.loc[:, ['onset', 'duration', 'trial_type']].isna().values.any() > 0:
+        n_rows = data.shape[0]
+        to_keep = data.loc[:, ['onset', 'duration', 'trial_type']].dropna(how='any', axis=0).index
+        data = data.loc[to_keep, :]
+        logger.warn(f"Removed {n_rows - data.shape[0]} rows containing NaNs")
+
+    conditions = sorted(data['trial_type'].unique().tolist())
+    for run in data['run'].unique():
+        these_con = sorted(data.query("run == @run")['trial_type'].unique().tolist())
+        if not these_con == conditions:
+            logger.warn(
+                f"Conditions are not the same across runs! "
+                "This is a problem from GLMdenoise style analyses"
+            )
+            break
+
     save_data(data, cfg, ddict, par_dir='preproc', run=None, desc='preproc', dtype='events', ext='tsv')
 
     # Print some useful info about single-trials

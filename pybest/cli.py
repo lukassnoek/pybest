@@ -42,6 +42,7 @@ from .signal_model import run_signal_processing
 @click.option('--skip-signalproc', is_flag=True)
 @click.option('--signalproc-type', default='single-trial', type=click.Choice(['single-trial', 'glmdenoise']))
 @click.option('--contrast', default=None, type=click.STRING, show_default=True)
+@click.option('--bootstraps', default=100, type=click.INT, show_default=True)
 # 5.1. Single-trial options
 @click.option('--single-trial-id', default=None, type=click.STRING, show_default=True)
 @click.option('--hrf-model', default='glover', type=click.Choice(HRF_MODELS), show_default=True)
@@ -57,8 +58,8 @@ from .signal_model import run_signal_processing
 @click.option('--verbose', default='INFO', type=click.Choice(['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']), show_default=True)
 def main(bids_dir, out_dir, start_from, fprep_dir, ricor_dir, subject, session, ignore_sessions, task, space, hemi,
          gm_thresh, slice_time_ref, high_pass_type, high_pass, skip_noiseproc, noise_source, decomp, n_comps, cv_repeats, cv_splits, skip_signalproc,
-         signalproc_type, contrast, single_trial_id, hrf_model, single_trial_noise_model, regularize_hrf_model, single_trial_model, pattern_units, uncorrelation,
-         smoothing_fwhm, n_cpus, save_all, verbose):
+         signalproc_type, contrast, bootstraps, single_trial_id, hrf_model, single_trial_noise_model, regularize_hrf_model, single_trial_model,
+         pattern_units, uncorrelation, smoothing_fwhm, n_cpus, save_all, verbose):
     """ Main API of pybest. """
     
     ##### set + check parameters #####

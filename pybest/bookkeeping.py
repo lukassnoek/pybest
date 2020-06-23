@@ -102,8 +102,8 @@ def find_exp_parameters(cfg, logger):
             these_ses = [None] if not these_ses else these_ses
             cfg['session'].append(these_ses)
     else:
-        cfg['session'] = [cfg['session']] * len(cfg['subject'])
-
+        cfg['session'] = [[cfg['session']]] * len(cfg['subject'])
+    
     # Use all tasks if no explicit task is provided
     if cfg['task'] is None:
         cfg['task'] = []

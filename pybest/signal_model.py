@@ -132,7 +132,8 @@ def _run_single_trial_model_parallel(run, best_hrf_idx, ddict, cfg, logger):
         st_icept = np.zeros(Y.shape[1])
     
     if cfg['contrast'] is not None:
-        custom_contrast = np.zeros(Y.shape[1])
+        # ccon = custom contrast
+        ccon = np.zeros(Y.shape[1])
 
     # Loop over unique HRF indices (0-20 probably)
     for hrf_idx in tqdm_ctm(np.unique(best_hrf_idx), tdesc(f'Final model run {run+1}:')):
@@ -149,12 +150,13 @@ def _run_single_trial_model_parallel(run, best_hrf_idx, ddict, cfg, logger):
                 st_idx_x = X.columns.str.contains(cfg['single_trial_id'])
 
             # Loop across unique n comps
-            for this_vox_idx, this_X, labels, results in yield_glm_results(vox_idx, Y, X, conf, run, ddict, cfg):                
+            for out in yield_glm_results(vox_idx, Y, X, conf, run, ddict, cfg):                
+                this_vox_idx, this_X, labels, results = out
                 # Extract residuals, predictions, and r2
                 residuals[:, this_vox_idx] = get_param_from_glm('residuals', labels, results, this_X, time_series=True)
                 preds[:, this_vox_idx] = get_param_from_glm('predicted', labels, results, this_X, time_series=True)
                 r2[this_vox_idx] = get_param_from_glm('r_square', labels, results, this_X, time_series=False)
-                
+
                 # Loop over columns to extract parameters/zscores
                 for i, col in enumerate(this_X.columns):
                     cvec = np.zeros(this_X.shape[1])
@@ -180,12 +182,13 @@ def _run_single_trial_model_parallel(run, best_hrf_idx, ddict, cfg, logger):
                 if cfg['contrast'] is not None:
                     cvec = expression_to_contrast_vector(cfg['contrast'], this_X.columns.tolist())
                     con = compute_contrast(labels, results, con_val=cvec, contrast_type='t')
-                    custom_contrast[this_vox_idx] = getattr(con, STATS[cfg['pattern_units']])()
-        else:  # If not LSA, do LSS
-            # Loop over single-trials
+                    ccon[this_vox_idx] = getattr(con, STATS[cfg['pattern_units']])()
+        else:  # Least-squares separate
+            
             if len(st_names) == 0:
                 raise ValueError("Probably not wise to do LSS without single trials")
 
+            # Loop across single-trials
             for trial_nr, st_name in enumerate(st_names):
                 events_cp = events.copy()  # copy original events dataframe
                 # Set to-be-estimated trial to 'X', others to 'O', and create design matrix
@@ -195,7 +198,9 @@ def _run_single_trial_model_parallel(run, best_hrf_idx, ddict, cfg, logger):
                 X = X.iloc[:, :-1]
 
                 # Loop across unique n comps
-                for this_vox_idx, this_X, labels, results in yield_glm_results(vox_idx, Y, X, conf, run, ddict, cfg):
+                for out in yield_glm_results(vox_idx, Y, X, conf, run, ddict, cfg):
+                    this_vox_idx, this_X, labels, results = out
+                    # Store residuals, r2
                     residuals[:, this_vox_idx] += get_param_from_glm('residuals', labels, results, this_X, time_series=True)
                     r2[this_vox_idx] += get_param_from_glm('r_square', labels, results, this_X, time_series=False)
 
@@ -204,7 +209,8 @@ def _run_single_trial_model_parallel(run, best_hrf_idx, ddict, cfg, logger):
                     cvec[this_X.columns.tolist().index('X')] = 1
                     con = compute_contrast(labels, results, con_val=cvec, contrast_type='t')
                     patterns[trial_nr, this_vox_idx] = getattr(con, STATS[cfg['pattern_units']])()
-                    
+
+                    # Compute other conditions                    
                     for i, col in enumerate(cond_names):
                         cvec = np.zeros(this_X.shape[1])
                         cvec[this_X.columns.tolist().index(col)] = 1
@@ -215,7 +221,7 @@ def _run_single_trial_model_parallel(run, best_hrf_idx, ddict, cfg, logger):
                     if cfg['contrast'] is not None:
                         cvec = expression_to_contrast_vector(cfg['contrast'], this_X.columns.tolist())
                         con = compute_contrast(labels, results, con_val=cvec, contrast_type='t')
-                        custom_contrast[this_vox_idx] += getattr(con, STATS[cfg['pattern_units']])()
+                        ccon[this_vox_idx] += getattr(con, STATS[cfg['pattern_units']])()
 
             # Because we estimated the betas for the other conditions len(st_names) times,
             # average them by dividing them by the number of trials
@@ -234,21 +240,21 @@ def _run_single_trial_model_parallel(run, best_hrf_idx, ddict, cfg, logger):
     
     # Extract single-trial (st) patterns and 
     # condition-average patterns (cond)
+    stype = cfg['pattern_units']
     if cfg['single_trial_id'] is not None:
         st_patterns = patterns[st_idx_x, :]
-        save_data(st_patterns, cfg, ddict, par_dir='best', run=run+1, desc='trial', dtype=unit)
+        save_data(st_patterns, cfg, ddict, par_dir='best', run=run+1, desc='trial', dtype=stype)
         cond_patterns = patterns[~st_idx_x, :]
     else:
         cond_patterns = patterns
 
-    unit = cfg['pattern_units']
     # Only save single-trial stimulus intercept if there are single trials
     if cfg['single_trial_id'] is not None:
-        save_data(st_icept, cfg, ddict, par_dir='best', run=run+1, desc='stimicept', dtype=unit)
+        save_data(st_icept, cfg, ddict, par_dir='best', run=run+1, desc='stimicept', dtype=stype)
 
     # Save each parameter/statistic of the other conditions
     for i, name in enumerate(cond_names):    
-        save_data(cond_patterns[i, :], cfg, ddict, par_dir='best', run=run+1, desc=name, dtype=unit)
+        save_data(cond_patterns[i, :], cfg, ddict, par_dir='best', run=run+1, desc=name, dtype=stype)
 
     # Always save residuals
     save_data(residuals, cfg, ddict, par_dir='best', run=run+1, desc='model', dtype='residuals')
@@ -263,25 +269,29 @@ def _run_single_trial_model_parallel(run, best_hrf_idx, ddict, cfg, logger):
 
     # Save custom contrast (--contrast)
     if cfg['contrast'] is not None:
-        save_data(custom_contrast, cfg, ddict, par_dir='best', run=run+1, desc='customcontrast', dtype=unit)
+        save_data(custom_contrast, cfg, ddict, par_dir='best', run=run+1, desc='customcontrast', dtype=stype)
 
 
 def _run_glmdenoise_model(ddict, cfg, logger):
     """ Runs a GLMdenoise-style cross-validated analysis. """
-    n_runs = np.unique(ddict['run_idx']).size
-    cv = LeaveOneGroupOut()
-
     Y_all = ddict['denoised_func'].copy()
     nonzero = ~np.all(np.isclose(Y_all, 0.), axis=0)
 
-    # Pre-allocate some stuff. Patterns are condition-wise parameter estimates (or z-scres)
+    # Some shortcuts
+    n_runs = np.unique(ddict['run_idx']).size
+    K = Y_all.shape[1]
+    stype = STATS[cfg['pattern_units']]
+
+    # Pre-allocate some stuff, separately for bootstrap data (boot) and 
+    # parameteric data (param)
     conditions = ddict['preproc_events']['trial_type'].unique().tolist()
-    patterns = np.zeros((len(conditions), Y_all.shape[1]))
-    #residuals = np.zeros_like(Y_all)
-    r2 = np.zeros(Y_all.shape[1])
+    cond_boot = np.zeros((cfg['bootstraps'], len(conditions), K))
+    cond_param = np.zeros((len(conditions), K))
 
     if cfg['contrast'] is not None:
-        custom_contrast = np.zeros(Y_all.shape[1])
+        # ccon = custom contrast
+        ccon_boot = np.zeros((cfg['bootstraps'], K))
+        ccon_param = np.zeros(K)  # parametric
 
     # Note: opt_n_comps is the same for each run!
     opt_n_comps = ddict['opt_n_comps'][0, :].astype(int)
@@ -290,13 +300,14 @@ def _run_glmdenoise_model(ddict, cfg, logger):
     else:
         opt_hrf_idx = np.zeros(Y_all.shape[0]).astype(int)
 
+    # bootstrap indices [[1, 2, 3, 4], [1, 2, 2, 3], [3, 2, 1, 1]] etc.
+    boots = [np.random.choice(np.arange(n_runs), size=n_runs)
+             for _ in range(cfg['bootstraps'])]
+
     # Loop over HRF indices
     for hrf_idx in np.unique(opt_hrf_idx).astype(int):            
         # Loop over n-components
         for n_comp in np.unique(opt_n_comps):
-
-            if n_comp == 0:
-                continue
 
             # Determine voxel index (intersection nonzero and the voxels that 
             # were denoised with the current n_comp)
@@ -314,7 +325,9 @@ def _run_glmdenoise_model(ddict, cfg, logger):
                 X = X.iloc[:, :-1]  # remove intercept
 
                 # Orthogonalize noise components w.r.t. design matrix
-                X.loc[:, :], _ = custom_clean(X, this_Y, confs[:, :n_comp], tr, ddict, cfg, clean_Y=False)
+                if n_comp != 0:
+                    X.loc[:, :], _ = custom_clean(X, this_Y, confs[:, :n_comp], tr, ddict, cfg, clean_Y=False)
+    
                 X = X - X.mean(axis=0)
                 Xs.append(X)
 
@@ -322,63 +335,56 @@ def _run_glmdenoise_model(ddict, cfg, logger):
             X = pd.concat(Xs, axis=0)
             Y = Y_all[:, vox_idx]  # only current voxels
 
-            # Perform leave-one-run-out cross-validation
-            for train_idx, test_idx in cv.split(X, Y, ddict['run_idx']):
-                # Fit GLM on train data
-                X_train, Y_train = X.iloc[train_idx, :], Y[train_idx, :]
-                labels, results = run_glm(Y_train, X_train.to_numpy(), noise_model='ols')
+            # Get regular (parametric) scores
+            labels, results = run_glm(Y, X.to_numpy(), noise_model='ols')
+            for i, cond in enumerate(conditions):
+                cvec = np.zeros(len(conditions))
+                cvec[X.columns.tolist().index(cond)] = 1
+                con = compute_contrast(labels, results, cvec)
+                cond_param[i, vox_idx] = getattr(con, stype)()
+            
+            cvec = expression_to_contrast_vector(cfg['contrast'], X.columns.tolist())
+            con = compute_contrast(labels, results, cvec)
+            ccon_param[vox_idx] = getattr(con, stype)()
+
+            # Also get bootstrap scores
+            for i_boot in tqdm(range(cfg['bootstraps'])):
+                Xb, Yb = [], []
+                for run_idx in boots[i_boot]:
+                    Yb.append(Y[ddict['run_idx'] == run_idx, :])
+                    Xb.append(X.loc[ddict['run_idx'] == run_idx, :])
+
+                Xb = pd.concat(Xb, axis=0)
+                Yb = np.vstack(Yb)
+
+                labels, results = run_glm(Yb, Xb.to_numpy(), noise_model='ols')
+                for i, cond in enumerate(conditions):
+                    cvec = np.zeros(len(conditions))
+                    cvec[X.columns.tolist().index(cond)] = 1
+                    con = compute_contrast(labels, results, cvec)
+                    cond_boot[i_boot, i, vox_idx] = getattr(con, stype)()
                 
-                # Get predictions for test data (theta @ X_test)
-                theta = get_param_from_glm('theta', labels, results, X_train, time_series=False, predictors=True)
-                preds = X.iloc[test_idx, :].to_numpy() @ theta
+                cvec = expression_to_contrast_vector(cfg['contrast'], X.columns.tolist())
+                con = compute_contrast(labels, results, cvec)
+                ccon_boot[i_boot, vox_idx] = getattr(con, stype)()
 
-                # Get r2
-                r2[vox_idx] += r2_score(Y[test_idx, :], preds, multioutput='raw_values')
-
-                # Determine noise term (which is independent from contrast)
-                residuals = Y[test_idx, :] - preds
-                sig_sq = np.sum(residuals ** 2, axis=0) / (preds.shape[0] - X.shape[1])
-                X_train = X_train.to_numpy()  # get rid of columns/index
-
-                # Compute contrasts against baseline
-                for i, c in enumerate(conditions):
-                    cvec = np.zeros(X.shape[1])
-                    cvec[X.columns.tolist().index(c)] = 1
-                    # Compute "design variance" term
-                    dvar = cvec @ np.linalg.inv(X_train.T @ X_train) @ cvec.T
-                    if cfg['pattern_units'] == 'beta':
-                        patterns[i, vox_idx] += cvec @ theta
-                    else:  # get zscores
-                        # Variance beta = noise term * design variance
-                        tvals = (cvec @ theta) / np.sqrt(sig_sq * dvar)
-                        # default: 2-sided p-value
-                        pvals = stats.t.sf(np.abs(tvals), preds.shape[0]-1) * 2
-                        patterns[i, vox_idx] += z_score(pvals)
-
-                # Evaluate custom contrast
-                if cfg['contrast'] is not None:
-                    # Get contrast vector
-                    cvec = expression_to_contrast_vector(cfg['contrast'], X.columns.tolist())
-                    dvar = cvec @ np.linalg.inv(X_train.T @ X_train) @ cvec.T
-                    if cfg['pattern_units'] == 'beta':
-                        custom_contrast[vox_idx] += cvec @ theta
-                    else:
-                        tvals = (cvec @ theta) / np.sqrt(sig_sq * dvar)
-                        # default: 2-sided p-value
-                        pvals = stats.t.sf(np.abs(tvals), preds.shape[0]-1) * 2
-                        custom_contrast[vox_idx] += z_score(pvals)
-
-    # Divide estimates by number of cross-validation splits
-    r2 /= cv.get_n_splits(groups=ddict['run_idx'])
-    save_data(r2, cfg, ddict, par_dir='best', run=None, desc='model', dtype='r2')
-
-    patterns /= cv.get_n_splits(groups=ddict['run_idx'])
-    for i, c, in enumerate(conditions):
-        patterns[i, :] = masking.apply_mask(masking.unmask(patterns[i, :], ddict['mask']), ddict['mask'], smoothing_fwhm=cfg['smoothing_fwhm'])
-        save_data(patterns[i, :], cfg, ddict, par_dir='best', run=None, desc=c, dtype=cfg['pattern_units'])
+    # save stuff! Both bootstrap and parametric scores
+    cond_boot_mean = np.mean(cond_boot, axis=0)
+    if cfg['pattern_units'] == 'beta':
+        for i, cond in enumerate(conditions):
+            save_data(cond_boot_mean[i, :], cfg, ddict, par_dir='best', run=None, desc=cond, dtype='bootstrapbeta')
+            save_data(cond_param[i, :], cfg, ddict, par_dir='best', run=None, desc=cond, dtype='parametricbeta')
+    else:
+        for i, cond in enumerate(conditions):
+            cond_boot_var = np.var(cond_boot, axis=0, ddof=1)
+            cond_t = cond_boot_mean / np.sqrt(cond_boot_var)
+            save_data(cond_t[i, :], cfg, ddict, par_dir='best', run=None, desc=cond, dtype='bootstraptstat')
+            save_data(cond_param[i, :], cfg, ddict, par_dir='best', run=None, desc=cond, dtype='parametrictstat')
 
     if cfg['contrast'] is not None:
-        custom_contrast /= cv.get_n_splits(groups=ddict['run_idx'])
-        custom_contrast = masking.apply_mask(masking.unmask(custom_contrast, ddict['mask']), ddict['mask'], smoothing_fwhm=cfg['smoothing_fwhm'])        
-        save_data(custom_contrast, cfg, ddict, par_dir='best', run=None, desc='custom', dtype=cfg['pattern_units'])
-
+        ccon_mean = np.mean(ccon_boot, axis=0)
+        ccon_var = np.var(ccon_boot, axis=0, ddof=1)
+        ccon_t = ccon_mean / np.sqrt(ccon_var)
+        save_data(ccon_mean, cfg, ddict, par_dir='best', run=None, desc='custom', dtype='bootstrapbeta')
+        save_data(ccon_t, cfg, ddict, par_dir='best', run=None, desc='custom', dtype='bootstraptstat')
+        save_data(ccon_param, cfg, ddict, par_dir='best', run=None, desc='custom', dtype=f"parametric{cfg['pattern_units']}")
