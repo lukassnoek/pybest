@@ -10,43 +10,58 @@ def check_parameters(cfg, logger):
     if cfg['single_trial_id'] is None:
         logger.warn("No single-trial-id found! Treating trials as conditions")
 
+    if cfg['bids_dir'] is None and cfg['noise_source'] == 'noisepool':
+        raise ValueError("Need a BIDS-dir (for event-files) to create a noise pool; "
+                         "Provide a BIDS-dir as the second positional argument")
+
+    if cfg['bids_dir'] is None and cfg['noiseproc_type'] == 'between':
+        raise ValueError("Need a BIDS-dir (for event-files) to do between-run "
+                         "(GLMdenoise-style) denoising; provide a BIDS-dir as the "
+                         " second positional argument")
+
+    if cfg['bids_dir'] is None and cfg['signalproc_type'] == 'glmdenoise':
+        raise ValueError("Need a BIDS-dir (for event-files) to do GLMdenoise style "
+                         "parameter estimation; provide a BIDS-dir as the "
+                         " second positional argument")
+
     if cfg['uncorrelation'] and cfg['single_trial_model'] == 'lss':
         raise ValueError("Cannot use uncorrelation in combination with LSS.")
 
-    if cfg['noise_source'] == 'noisepool' and cfg['skip_signalproc']:
-        raise ValueError("Cannot skip signal proc when using noise-source == noisepool")
-
-    if cfg['signalproc_type'] == 'glmdenoise' and not cfg['ignore_sessions']:
+    if cfg['signalproc_type'] == 'glmdenoise' and not cfg['pool_sessions']:
         logger.warn(
             f"It's recommended to pool data across sessions with GLMdenoise"
             "-style denoising in order to use all trials available! "
-            "To do so, use --ingore-sessions"
+            "To do so, use --pool-sessions"
         )
+
+    if cfg['noiseproc_type'] == 'within' and cfg['noise_source'] == 'noisepool':
+        logger.warn("Using within-run denoising with a noise-pool will lead to overfitting!")
 
 
 def set_defaults(cfg, logger):
     """ Sets default inputs. """
-    if not op.isdir(cfg['bids_dir']):
-        raise ValueError(f"BIDS directory {cfg['bids_dir']} does not exist!")
+    if not op.isdir(cfg['fprep_dir']):
+        raise ValueError(f"Fmriprep directory {cfg['fprep_dir']} does not exist!")
 
-    logger.info(f"Using BIDS directory {cfg['bids_dir']}")
+    if cfg['bids_dir'] is None:
+        cfg['skip_signalproc'] = True
+        logger.warn("No BIDS directory given, so setting --skip-signalproc")
+    else:
+        logger.info(f"Using BIDS directory {cfg['bids_dir']}")
 
     if cfg['out_dir'] is None:  # Set default out_dir
-        cfg['out_dir'] = op.join(cfg['bids_dir'], 'derivatives', 'pybest')
+        if cfg['bids_dir'] is None:
+            par_dir = op.dirname(cfg['fprep_dir'])
+        else:
+            par_dir = op.join(cfg['bids_dir'], 'derivatives')
+        
+        cfg['out_dir'] = op.join(par_dir, 'pybest')
         if not op.isdir(cfg['out_dir']):
             os.makedirs(cfg['out_dir'], exist_ok=True)
 
         logger.info(f"Setting output directory to {cfg['out_dir']}")
 
-    if cfg['fprep_dir'] is None:
-        cfg['fprep_dir'] = op.join(cfg['bids_dir'], 'derivatives', 'fmriprep')
-        logger.info(f"Setting Fmriprep directory to {cfg['fprep_dir']}")
-
-        if not op.isdir(cfg['fprep_dir']):
-            raise ValueError(
-                f"Fmriprep directory {cfg['fprep_dir']} does not exist.")
-
-    if cfg['ricor_dir'] is None:
+    if cfg['ricor_dir'] is None and cfg['bids_dir'] is not None:
         cfg['ricor_dir'] = op.join(
             cfg['bids_dir'], 'derivatives', 'physiology')
         if not op.isdir(cfg['ricor_dir']):
@@ -167,9 +182,9 @@ def find_exp_parameters(cfg, logger):
         
         cfg['task'] = all_ses_tasks
 
-    # If --ignore-sessions, then "pool" all runs in a single session
+    # If --pool-sessions, then "pool" all runs in a single session
     # (Maybe this should be default, anyway.)
-    if cfg['ignore_sessions']:
+    if cfg['pool_sessions']:
         cfg['session'] = [[None] for _ in range(len(cfg['subject']))]
         cfg['task'] = [[[t for t in task[0]]] for task in cfg['task']]
 
@@ -181,7 +196,7 @@ def find_data(cfg, logger):
     
     # Set right "identifier" depending on fsaverage* or volumetric space
     sub, ses, task, hemi, space = cfg['c_sub'], cfg['c_ses'], cfg['c_task'], cfg['hemi'], cfg['space']
-    if cfg['ignore_sessions']:
+    if cfg['pool_sessions']:
         ses = '*'  # wilcard for globbing across sessions
 
     # idf = identifier for files
@@ -199,21 +214,26 @@ def find_data(cfg, logger):
 
     # Find event files, which should be in the BIDS dir
     bids_dir = cfg['bids_dir']
-    if ses is None:
-        bfunc_dir = op.join(bids_dir, f'sub-{sub}', 'func')
+    if bids_dir is not None:
+        if ses is None:
+            bfunc_dir = op.join(bids_dir, f'sub-{sub}', 'func')
+        else:
+            bfunc_dir = op.join(bids_dir, f'sub-{sub}', f'ses-{ses}', 'func')
+
+        events = sorted(glob(op.join(bfunc_dir, f'*task-{task}*_events.tsv')))
+
+        if len(events) == 0:
+            logger.warning(
+                "Did not find event files! Going to assume there's no task involved."
+            )
+            events = None
+            to_check = [confs]
+        else:
+            to_check = [confs, events]
     else:
-        bfunc_dir = op.join(bids_dir, f'sub-{sub}', f'ses-{ses}', 'func')
-
-    events = sorted(glob(op.join(bfunc_dir, f'*task-{task}*_events.tsv')))
-
-    if len(events) == 0:
-        logger.warning(
-            "Did not find event files! Going to assume there's no task involved."
-        )
         events = None
+        logger.warn("No BIDS directory given, so didn't find event-files")
         to_check = [confs]
-    else:
-        to_check = [confs, events]
 
     # Number of funcs and confs (and possibly events) should be the same
     if not all(len(funcs) == len(tmp) for tmp in to_check):

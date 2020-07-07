@@ -13,12 +13,8 @@ from sklearn.model_selection import RepeatedKFold, LeaveOneGroupOut
 
 from .logging import tqdm_ctm, tdesc
 from .utils import get_run_data, get_frame_times, create_design_matrix, hp_filter
-from .utils import save_data, load_gifti, custom_clean
+from .utils import save_data, load_gifti, custom_clean, argmax_regularized
 from .models import cross_val_r2
-
-# IDEAS
-# - "smarter" way to determine optimal n_comps (better than argmax)? regularize
-# - use Kendrick's cutoff: 5% from optimal
 
 
 def run_noise_processing(ddict, cfg, logger):
@@ -30,7 +26,10 @@ def run_noise_processing(ddict, cfg, logger):
         logger.warn("Skipping noise processing (because of --skip-noiseproc)")
         ddict['denoised_func'] = ddict['preproc_func']
         n_runs = len(ddict['preproc_func'])
-        ddict['opt_n_comps'] = np.zeros((n_runs, ddict['preproc_func'].shape[1]))
+        if cfg['signalproc_type'] == 'glmdenoise':
+            ddict['opt_n_comps'] = np.zeros(ddict['preproc_func'].shape[1])
+        else:
+            ddict['opt_n_comps'] = np.zeros((n_runs, ddict['preproc_func'].shape[1]))
         save_data(ddict['opt_n_comps'], cfg, ddict, par_dir='denoising', run=None, desc='opt', dtype='ncomps')        
         return ddict
 
@@ -40,7 +39,8 @@ def run_noise_processing(ddict, cfg, logger):
     n_runs = np.unique(ddict['run_idx']).size
     K = ddict['preproc_func'].shape[1]  # voxels
 
-    if cfg['signalproc_type'] == 'single-trial':
+    # Within-run (cross-validated) confound regression
+    if cfg['noiseproc_type'] == 'within':
         # Must be > 0
         n_comps = np.arange(1, cfg['n_comps']+1).astype(int)  # range of components to test
     
@@ -54,26 +54,50 @@ def run_noise_processing(ddict, cfg, logger):
             run, ddict, cfg, logger, n_comps, cv) for run in range(n_runs)
         )
 
-        ddict['opt_n_comps'] = np.zeros((n_runs, K))
+        # runs x n_comps x voxels
+        r2 = np.stack(r2s_list)
 
-        # Determine, per runs, the optimal number of noise comps
-        for i, r2_ncomps in enumerate(r2s_list):
-            # Compute maximum r2 across n-comps
-            r2_max = r2_ncomps.max(axis=0)
-            opt_n_comps_idx = r2_ncomps.argmax(axis=0)
+        if cfg['regularize_n_comps']:  # same n_comps for each run
+
+            # Compute median across runs
+            r2_median = np.median(r2, axis=0)  # median across runs
+            save_data(r2_median, cfg, ddict, par_dir='denoising', run=None, desc='ncomps', dtype='medianr2')
+
+            # Maximum r2 across n-comps
+            r2_max = r2_median.max(axis=0)
+
+            # Use de-meaned median score to selected cutoff
+            r2_median_tmp = np.median(r2 - r2.mean(axis=0), axis=0)  # median across runs
+
+            opt_n_comps_idx = argmax_regularized(r2_median_tmp, axis=0)
             opt_n_comps = n_comps[opt_n_comps_idx.astype(int)]
-            opt_n_comps[r2_max < 0] = 0  # set negative r2 voxels to 0 comps
-        
-            # Save for later denoising process (and signal-model, because we need
-            # to orthogonalize our design matrix w.r.t. the confounds)
-            ddict['opt_n_comps'][i, :] = opt_n_comps
+            opt_n_comps[r2_max < 0] = 0
+            ddict['opt_n_comps'] = opt_n_comps
+            
+            for run in range(n_runs):
+                r2_ncomps = r2[run, :, :]
+                r2_max = r2_ncomps.max(axis=0)
+                if cfg['save_all']:
+                    save_data(r2_max, cfg, ddict, par_dir='denoising', run=run+1, desc='max', dtype='r2')
+                    save_data(r2_ncomps, cfg, ddict, par_dir='denoising', run=run+1, desc='ncomps', dtype='r2')
+        else:
+            # Per-run optimal n-comps
+            ddict['opt_n_comps'] = n_comps[argmax_regularized(r2, axis=1)]
+            
+            # Determine, per runs, the optimal number of noise comps
+            for run in range(n_runs):
+                r2_ncomps = r2[run, :, :]
+                # Compute maximum r2 across n-comps
+                r2_max = r2_ncomps.max(axis=0)
+                ddict['opt_n_comps'][run, r2_max < 0] = 0
 
-            if cfg['save_all']:
-                to_save = [(r2_ncomps, 'ncomps', 'r2'), (r2_ncomps.max(axis=0), 'max', 'r2'), (opt_n_comps, 'opt', 'ncomps')]
-                for data, desc, dtype in to_save:
-                    save_data(data, cfg, ddict, par_dir='denoising', run=None, desc=desc, dtype=dtype)
-
-    else:  # Fit GLMdenoise-style models
+                if cfg['save_all']:
+                    opt_n_comps = ddict['opt_n_comps'][run, :]
+                    to_save = [(r2_ncomps, 'ncomps', 'r2'), (r2_max, 'max', 'r2'), (opt_n_comps, 'opt', 'ncomps')]
+                    for data, desc, dtype in to_save:
+                        save_data(data, cfg, ddict, par_dir='denoising', run=run+1, desc=desc, dtype=dtype)
+    else:  # between-run, GLMdenoise style denoising
+        # Also check 0 components!
         n_comps = np.arange(0, cfg['n_comps']+1).astype(int)  # range of components to test
     
         # Initialize R2 array (across HRFs/n-components/voxels)
@@ -93,12 +117,13 @@ def run_noise_processing(ddict, cfg, logger):
         r2_max = r2_ncomps.max(axis=0)
 
         # Find optimal number of components and HRF index
-        opt_n_comps = n_comps[r2_ncomps.argmax(axis=0).astype(int)]
+        opt_n_comps = n_comps[argmax_regularized(r2_ncomps, axis=0)]
         opt_n_comps[r2_max < 0] = 0
         opt_hrf_idx = np.zeros(K)
 
         for i in n_comps:
             idx = opt_n_comps == i
+            # Do not regularize HRF index
             opt_hrf_idx[idx] = r2[:, i, idx].argmax(axis=0)
 
         # Always save the following:
@@ -111,13 +136,19 @@ def run_noise_processing(ddict, cfg, logger):
                 save_data(data, cfg, ddict, par_dir='denoising', run=None, desc=desc, dtype=dtype)
 
         ddict['opt_hrf_idx'] = opt_hrf_idx
-        ddict['opt_n_comps'] = np.tile(opt_n_comps, n_runs).reshape((n_runs, K))
+        ddict['opt_n_comps'] = opt_n_comps
 
     ### START DENOISING PROCESS ###
 
     # Pre-allocate clean func
     func_clean = ddict['preproc_func'].copy()
     for run in tqdm_ctm(range(n_runs), tdesc('Denoising funcs: ')):
+
+        # If we have a run-specific optimal n-comps, use it
+        if ddict['opt_n_comps'].ndim > 1:
+            opt_n_comps = ddict['opt_n_comps'][run, :]
+        else:  # otherwise use the "regularized" optimal n-comps (same for all runs)
+            opt_n_comps = ddict['opt_n_comps']
 
         # Loop over unique indices
         func, conf, _ = get_run_data(ddict, run, func_type='preproc')
@@ -194,7 +225,7 @@ def _run_parallel_across_runs(ddict, cfg, logger, this_n_comp, cv):
         to_iter = range(1)
 
     # Define model (linreg) and cross-validation routine (leave-one-run-out)        
-    model = LinearRegression(fit_intercept=False)
+    model = LinearRegression(fit_intercept=False, n_jobs=1)
     # Define fMRI data (Y) and full confound matrix (C)
     Y = ddict['preproc_func'].copy()
 
@@ -240,13 +271,15 @@ def load_denoising_data(ddict, cfg):
         ddict['mask'] = None
         ddict['trs'] = [load_gifti(f)[1] for f in ddict['funcs']]
         ddict['opt_n_comps'] = np.load(op.join(denoising_dir, f'{f_base}_desc-opt_ncomps.npy'))
-        ddict['opt_hrf_idx'] = np.load(op.join(denoising_dir, f'{f_base}_desc-opt_hrf.npy'))
+        if cfg['hrf_model'] == 'kay':
+            ddict['opt_hrf_idx'] = np.load(op.join(denoising_dir, f'{f_base}_desc-opt_hrf.npy'))
         ddict['denoised_func'] = np.load(op.join(denoising_dir, f'{f_base}_desc-denoised_bold.npy'))
     else:
         ddict['mask'] = nib.load(op.join(preproc_dir, f'{f_base}_desc-preproc_mask.nii.gz'))
         ddict['trs'] = [nib.load(f).header['pixdim'][4] for f in ddict['funcs']]
         ddict['opt_n_comps'] = masking.apply_mask(op.join(denoising_dir, f'{f_base}_desc-opt_ncomps.nii.gz'), ddict['mask'])
-        ddict['opt_hrf_idx'] = masking.apply_mask(op.join(denoising_dir, f'{f_base}_desc-opt_hrf.nii.gz'), ddict['mask'])
+        if cfg['hrf_model'] == 'kay':
+            ddict['opt_hrf_idx'] = masking.apply_mask(op.join(denoising_dir, f'{f_base}_desc-opt_hrf.nii.gz'), ddict['mask'])
         ddict['denoised_func'] = masking.apply_mask(op.join(denoising_dir, f'{f_base}_desc-denoised_bold.nii.gz'), ddict['mask'])
 
     ddict['preproc_conf'] = pd.read_csv(op.join(preproc_dir, f'{f_base}_desc-preproc_conf.tsv'), sep='\t')

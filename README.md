@@ -1,46 +1,28 @@
 # pybest
-PYthon package for Beta ESTimation (of single-trial fMRI data)
+PYthon package for Beta ESTimation
 
-## Notes
-[Notes about the project in a Google doc](https://docs.google.com/document/d/e/2PACX-1vQ1xuPuqeO6V-qccE1dHPkj53yHSVXbldqQMmLNqQt4HdlAQJljTrv7fEqw3WsDhF6dy63KG3tpWCtY/pub).
+## Warning
+This package is still in development and its API might change.
+Also, note that it has a very extensive API (many options), but each option has a sensible default.
 
-### Download example/test data
-In the root of the directory, run:
-
-```
-./scripts/download_data
-```
-
-This will download one Fmriprep-preprocessed subject with one session (with 6 runs), which includes preprocessed volume and surface (gifti) data, confounds, and events. Note, it's 2.5 GB, so it might take a while.
+## What you need to run pybest ...
+* Fmriprep-preprocessed data (or data with *desc-preproc_bold, *desc-brain_mask, and *desc-confounds_regressors.tsv files)
+* Tsv-formatted (BIDS-style) events-files (not necessary if you want to do denoising only)
+* Lots of RAM (especially when using multiple CPUs)
 
 ### Installing
-To install, clone the repository and run `pip install -e .` (the `-e` flag will install a development version).
+To install, clone the repository and run `pip install -e .` (the `-e` flag will install a development version, which you can omit).
 
 ### Using pybest
-First, download the data. Then, check its API by:
+The API is relatively well documented. Check it out by running:
 
 ```
 pybest --help
-
-Usage: pybest [OPTIONS] BIDS_DIR [OUT_DIR] [FPREP_DIR] [RICOR_DIR]
-
-  Main API of pybest.
-
-Options:
-  --participant-label TEXT
-  --session TEXT
-  --task TEXT
-  --space TEXT
-  --high-pass FLOAT
-  --hemi TEXT
-  --tr FLOAT
-  --help                    Show this message and exit.
 ```
 
-After downloading the example data, you can test `pybest` as follows:
+The only actual obligatory argument is the path to your Fmriprep directory. The `--subject`, `--session`, and `--task` can be used to restrict `pybest` to process only a part of your dataset. These parameters are optional, but not setting them will cause `pybest` to process *everything* it can find in your Fmriprep directory. 
 
-```
-pybest pybest/data/ni-edu --space {T1w,fsaverage6} --tr 0.7
-```
-
-The `--tr` parameter is only necessary when using `fsaverage6` space (because the gifti header does not store the scan's TR).
+The other parameters all have sensible defaults (but which you can change as desired). By default, `pybest` will do the following:
+1. Preprocess the functional data (high-pass at 0.01 Hz + standardization) and confounds (high-pass + PCA to extract 50 components);
+2. Perform "within-run" style noise-processing using 5 fold cross-validation and 1-50 noise components for each run separately (no --regularize-n-comps);
+3. Run a least-squares-all (LSA) style using the Glover HRF on the denoised data, but only if --single-trial-id {identifier} is set (e.g. --single-trial-id face_). All events with this identifier in the `trial_type` column in the associated events-file will be treated as a separate trial. All other events are modelled as a condition. The "patterns" are whitened with the design covariance and saved as "betas" (alternative: zscore).

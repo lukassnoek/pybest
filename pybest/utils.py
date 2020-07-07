@@ -30,6 +30,35 @@ def load_gifti(f, return_tr=True):
     else:
         return data
 
+def argmax_regularized(data, axis=0, percent=5):
+    """ Argmax but "regularized" by not taking the actual argmax,
+    but one relative to `percent` deviation from the max, like
+    what is done in the original GLMdenoise paper.
+
+    Parameters
+    ----------
+    data : numpy array
+        A 1D, 2D, or 3D numpy array
+    axis : int
+        Axis to take the argmax over (e.g., the one representing n_comps)
+    percent : int/float
+        How much the "optimal" index may deviate from the max
+
+    Returns
+    -------
+    The "regularized argmax'ed" array
+    """
+    # Compute maximum score across axis
+    maxx = data.max(axis=axis)
+    # Define cutoff as 5% from maximum (Kay method)
+    cutoff = maxx * (1 - percent / 100.)
+    # Some vectorization magic
+    if data.ndim == 3:
+        cutoff = cutoff[:, np.newaxis, :]
+
+    # Find first index (argmax) that satisfies criterion
+    return (data >= cutoff).argmax(axis=axis)
+
 
 def save_data(data, cfg, ddict, par_dir, run, desc, dtype, ext=None, skip_if_single_run=False):
     """ Saves data as either numpy files (for fs* space data) or
@@ -94,7 +123,7 @@ def hp_filter(data, tr, ddict, cfg, standardize=True):
     if cfg['high_pass_type'] == 'dct':
         hp_set = dct_set(cfg['high_pass'], ft)
         data = signal.clean(data, detrend=False, standardize=standardize, confounds=hp_set)
-    else:  # savgol, hardcode polyorder
+    else:  # savgol, hardcode polyorder (maybe make argument?)
         window = int(np.round((1 / cfg['high_pass']) / tr))
         data -= savgol_filter(data, window_length=window, polyorder=2, axis=0)
         if standardize:
@@ -117,7 +146,7 @@ def get_frame_times(tr, ddict, cfg, Y):
 
 
 def get_param_from_glm(name, labels, results, dm, time_series=False, predictors=False):
-    """ Get parameters from a fitted nistats GLM. """
+    """ Get parameters from a fitted Nilearn GLM. """
     if predictors and time_series:
         raise ValueError("Cannot get predictors and time series.")
 
@@ -136,38 +165,37 @@ def get_param_from_glm(name, labels, results, dm, time_series=False, predictors=
 
 def create_design_matrix(tr, frame_times, events, hrf_model='kay', hrf_idx=None):
     """ Creates a design matrix based on a HRF from Kendrick Kay's set
-    or a default one from Nistats. """
+    or a default one from Nilearn. """
     
     # This is to keep oversampling consistent across hrf_models
     hrf_oversampling = 10
     design_oversampling = tr / (0.1 / hrf_oversampling)
 
-    if hrf_model != 'kay':  # just use Nilearn
+    if hrf_model != 'kay':  # just use Nilearn!
         return make_first_level_design_matrix(
             frame_times, events, drift_model=None, min_onset=0,
             oversampling=design_oversampling, hrf_model=hrf_model
         )
 
     if hrf_model == 'kay':
-        
         if hrf_idx is None:  # 20 different DMs (based on different HRFs)
             to_iter = range(HRFS_HR.shape[1])
-        else:
+        else:  # use the supplied HRF idx (e.g., 5)
             to_iter = [hrf_idx]
 
-        # dms will store all design matrices
-        dms = []
-        for hrf_idx in to_iter:
+        dms = []  # will store all design matrices
+        for hrf_idx in to_iter:  # iterate across all HRFs
             hrf = HRFS_HR[:, hrf_idx]
-            
-            # To match the design oversampling, do it relative to tr
+
+            # Get info            
             trial_type, onset, duration, modulation = check_events(events)
 
             # Pre-allocate design matrix; note: columns are alphabetically sorted
             X = np.zeros((frame_times.size, np.unique(trial_type).size))
-            uniq_trial_types = np.unique(trial_type)
+            uniq_trial_types = np.unique(trial_type)  # this is sorted
 
             # Create separate regressor for each unique trial type
+            # Code copied from Nilearn glm module
             for i, condition in enumerate(uniq_trial_types):
                 condition_mask = (trial_type == condition)
                 exp_condition = (
@@ -182,10 +210,11 @@ def create_design_matrix(tr, frame_times, events, hrf_model='kay', hrf_idx=None)
                 
                 # Convolve with HRF and downsample
                 conv_reg = np.convolve(hr_regressor, hrf)[:hr_regressor.size]
-                f = interp1d(hr_frame_times, conv_reg)
+                f = interp1d(hr_frame_times, conv_reg)  # linear interpolation for now ...
                 X[:, i] = f(frame_times).T
             
-            X /= X.max(axis=0)  # rescale to max = 1
+            # Note to self: do not scale such that max(X, axis=0) is 1, because you'll lose info
+            # about predictor variance!
             dm = pd.DataFrame(X, columns=uniq_trial_types, index=frame_times)
             dm['constant'] = 1  # and intercept/constant
             dms.append(dm)
@@ -213,9 +242,22 @@ def get_run_data(ddict, run, func_type='preproc'):
 
 
 def yield_glm_results(vox_idx, Y, X, conf, run, ddict, cfg):
+    """ Utility to easily loop across GLM results for voxels with
+    unique number of noise components, which is cumbersome but necessary for
+    proper orthogonalization, becausô noise components (and HP-filter) previously regressed out of
+    the fMRI data should also be regressed out of the design matrix (X). """
 
+    # Pre-allocate optimal number of noise components array (opt_n_comps)
     tr = ddict['trs'][run]
-    opt_n_comps = ddict['opt_n_comps'][run, :].astype(int)
+    if ddict['opt_n_comps'].ndim > 1:
+        opt_n_comps = ddict['opt_n_comps'][run, :]
+    else:
+        opt_n_comps = ddict['opt_n_comps']
+
+    # Make sure they're integers (not doing this caused so many bugs because you cannot
+    # compare a float array to 0)
+    opt_n_comps = opt_n_comps.astype(int)
+
     nm = cfg['single_trial_noise_model']
     for this_n_comps in np.unique(opt_n_comps):  # loop across unique n comps
         # If n_comps is 0, then R2 was negative and we
@@ -228,20 +270,18 @@ def yield_glm_results(vox_idx, Y, X, conf, run, ddict, cfg):
         this_vox_idx = opt_n_comps == this_n_comps
         this_vox_idx = np.logical_and(vox_idx, this_vox_idx)
 
-        # Get confound matrix (X_n) and remove from design (this_X)
+        # Get confound matrix (X_n) ...
         C = conf[:, :this_n_comps]
         this_X = X.copy()
         if 'constant' in this_X.columns:
             X = X.drop('constant', axis=1)
         
-        this_X.loc[:, :], Y = custom_clean(this_X, Y, C, tr, ddict, cfg, standardize=True)
+        # ... and remove from design (this_X)
+        this_X.loc[:, :], Y = custom_clean(this_X, Y, C, tr, ddict, cfg, standardize=False)
+        # orthogonalize w.r.t. intercept
+        this_X = this_X - this_X.mean(axis=0)
 
-        # Set max to 1 (not sure whether I should actually do this)
-        this_X.iloc[:, :-1] = this_X.iloc[:, :-1] / \
-            this_X.iloc[:, :-1].max(axis=0)
-
-        
-        # Refit model on all data this time and remove fitted values
+        # Finally, fit actual GLM and yield results
         labels, results = run_glm(Y[:, this_vox_idx], this_X.to_numpy(), noise_model=nm)
         yield this_vox_idx, this_X, labels, results
 
@@ -260,6 +300,10 @@ def custom_clean(X, Y, C, tr, ddict, cfg, high_pass=True, clean_Y=True, standard
         Dataframe with confounds (timepoints x confound variables)
     high_pass : bool
         Whether to high-pass the data or not
+    clean_Y : bool
+        Whether to also clean Y
+    standardize : bool/str
+        Whether to standardize the data after cleaning
     """
 
     if 'constant' in X.columns:
@@ -336,6 +380,7 @@ def view_surf(file, hemi, space, fs_dir, threshold, idx):
     if dat.ndim > 1:
         raise ValueError("Data is 2D! Set --idx explicitly")
 
+    # Finally, plot it
     display = plotting.view_surf(
         surf_mesh=mesh,
         surf_map=dat,

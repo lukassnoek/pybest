@@ -109,7 +109,9 @@ def preprocess_confs_fmriprep(ddict, cfg, logger):
 
         # Load and remove cosine regressors
         data = pd.read_csv(conf, sep='\t')
-        to_remove = [col for col in data.columns if 'cosine' in col]
+        # Remove cosines and confounds related to the global signal
+        # Anecdotal evidence that leaving out the global signal gives better results ...
+        to_remove = [col for col in data.columns if 'cosine' in col or 'global' in col]
         data = data.drop(to_remove, axis=1)
         if cfg['ricor_dir'] is not None and ddict['ricors']:  # add RETROICOR regressors, if any
             ricor_data = pd.read_csv(ddict['ricors'][i], sep='\t')
@@ -133,8 +135,9 @@ def preprocess_confs_fmriprep(ddict, cfg, logger):
         # Extract desired number of components
         data = data[:, :cfg['n_comps']]
 
-        # Apply HP filter again (not sure if necessary)
-        data = hp_filter(data, ddict['trs'][i], ddict, cfg)
+        # Apply HP filter again (not sure if necessary), but a good idea
+        # for proper orthogonalization
+        data = hp_filter(data, ddict['trs'][i], ddict, cfg, standardize='zscore')
 
         # Make proper dataframe
         cols = [f'decomp_{str(c+1).zfill(3)}' for c in range(data.shape[1])]
