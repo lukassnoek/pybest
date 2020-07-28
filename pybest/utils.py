@@ -10,7 +10,7 @@ from scipy.interpolate import interp1d
 from scipy.signal import savgol_filter
 from nilearn import plotting, signal, masking
 from nilearn.datasets import fetch_surf_fsaverage
-from nilearn.stats.first_level_model import run_glm
+from nilearn.glm.first_level import run_glm
 from sklearn.linear_model import LinearRegression
 from nilearn.glm.first_level.experimental_paradigm import check_events
 from nilearn.glm.first_level.design_matrix import make_first_level_design_matrix
@@ -29,6 +29,7 @@ def load_gifti(f, return_tr=True):
         return data, tr
     else:
         return data
+
 
 def argmax_regularized(data, axis=0, percent=5):
     """ Argmax but "regularized" by not taking the actual argmax,
@@ -82,7 +83,7 @@ def save_data(data, cfg, ddict, par_dir, run, desc, dtype, ext=None, skip_if_sin
         Extension (to determine how to save the data). If None, assuming
         fMRI data.
     """
-    
+
     if data is None:
         return None
 
@@ -97,7 +98,8 @@ def save_data(data, cfg, ddict, par_dir, run, desc, dtype, ext=None, skip_if_sin
     if run is None:
         f_out = op.join(save_dir, cfg['f_base'] + f'_desc-{desc}_{dtype}')
     else:
-        f_out = op.join(save_dir, cfg['f_base'] + f'_run-{run}_desc-{desc}_{dtype}')
+        f_out = op.join(save_dir, cfg['f_base'] +
+                        f'_run-{run}_desc-{desc}_{dtype}')
 
     if ext == 'tsv':
         data.to_csv(f_out + '.tsv', sep='\t', index=False)
@@ -122,7 +124,8 @@ def hp_filter(data, tr, ddict, cfg, standardize=True):
     # Create high-pass filter and clean
     if cfg['high_pass_type'] == 'dct':
         hp_set = dct_set(cfg['high_pass'], ft)
-        data = signal.clean(data, detrend=False, standardize=standardize, confounds=hp_set)
+        data = signal.clean(data, detrend=False,
+                            standardize=standardize, confounds=hp_set)
     else:  # savgol, hardcode polyorder (maybe make argument?)
         window = int(np.round((1 / cfg['high_pass']) / tr))
         data -= savgol_filter(data, window_length=window, polyorder=2, axis=0)
@@ -166,7 +169,7 @@ def get_param_from_glm(name, labels, results, dm, time_series=False, predictors=
 def create_design_matrix(tr, frame_times, events, hrf_model='kay', hrf_idx=None):
     """ Creates a design matrix based on a HRF from Kendrick Kay's set
     or a default one from Nilearn. """
-    
+
     # This is to keep oversampling consistent across hrf_models
     hrf_oversampling = 10
     design_oversampling = tr / (0.1 / hrf_oversampling)
@@ -187,7 +190,7 @@ def create_design_matrix(tr, frame_times, events, hrf_model='kay', hrf_idx=None)
         for hrf_idx in to_iter:  # iterate across all HRFs
             hrf = HRFS_HR[:, hrf_idx]
 
-            # Get info            
+            # Get info
             trial_type, onset, duration, modulation = check_events(events)
 
             # Pre-allocate design matrix; note: columns are alphabetically sorted
@@ -207,12 +210,13 @@ def create_design_matrix(tr, frame_times, events, hrf_model='kay', hrf_idx=None)
                 hr_regressor, hr_frame_times = _sample_condition(
                     exp_condition, frame_times, design_oversampling, 0
                 )
-                
+
                 # Convolve with HRF and downsample
                 conv_reg = np.convolve(hr_regressor, hrf)[:hr_regressor.size]
-                f = interp1d(hr_frame_times, conv_reg)  # linear interpolation for now ...
+                # linear interpolation for now ...
+                f = interp1d(hr_frame_times, conv_reg)
                 X[:, i] = f(frame_times).T
-            
+
             # Note to self: do not scale such that max(X, axis=0) is 1, because you'll lose info
             # about predictor variance!
             dm = pd.DataFrame(X, columns=uniq_trial_types, index=frame_times)
@@ -223,21 +227,21 @@ def create_design_matrix(tr, frame_times, events, hrf_model='kay', hrf_idx=None)
             # Just return single design matrix
             dms = dms[0]
 
-        return dms 
+        return dms
 
 
 def get_run_data(ddict, run, func_type='preproc'):
     """ Get the data for a specific run. """
-    
+
     t_idx = ddict['run_idx'] == run  # timepoint index
     func = ddict[f'{func_type}_func'][t_idx, :].copy()
     conf = ddict['preproc_conf'].copy().loc[t_idx, :].to_numpy()
-    
+
     if ddict['preproc_events'] is not None:
         events = ddict['preproc_events'].copy().query("run == (@run + 1)")
     else:
         events = None
-    
+
     return func, conf, events
 
 
@@ -275,14 +279,16 @@ def yield_glm_results(vox_idx, Y, X, conf, run, ddict, cfg):
         this_X = X.copy()
         if 'constant' in this_X.columns:
             X = X.drop('constant', axis=1)
-        
+
         # ... and remove from design (this_X)
-        this_X.loc[:, :], Y = custom_clean(this_X, Y, C, tr, ddict, cfg, standardize=False)
+        this_X.loc[:, :], Y = custom_clean(
+            this_X, Y, C, tr, ddict, cfg, standardize=False)
         # orthogonalize w.r.t. intercept
         this_X = this_X - this_X.mean(axis=0)
 
         # Finally, fit actual GLM and yield results
-        labels, results = run_glm(Y[:, this_vox_idx], this_X.to_numpy(), noise_model=nm)
+        labels, results = run_glm(
+            Y[:, this_vox_idx], this_X.to_numpy(), noise_model=nm)
         yield this_vox_idx, this_X, labels, results
 
 
@@ -311,12 +317,14 @@ def custom_clean(X, Y, C, tr, ddict, cfg, high_pass=True, clean_Y=True, standard
 
     if high_pass:
         # Note to self: Y and C are already high-pass filtered
-        X.loc[:, :] = hp_filter(X.to_numpy(), tr, ddict, cfg, standardize=False)
-    
+        X.loc[:, :] = hp_filter(X.to_numpy(), tr, ddict,
+                                cfg, standardize=False)
+
     X.loc[:, :] = signal.clean(X.to_numpy(), detrend=False, standardize=False)
     X = X - X.mean(axis=0)
     if clean_Y:
-        Y = signal.clean(Y, detrend=False, confounds=C, standardize=standardize)
+        Y = signal.clean(Y, detrend=False, confounds=C,
+                         standardize=standardize)
 
     return X, Y
 
@@ -376,7 +384,7 @@ def view_surf(file, hemi, space, fs_dir, threshold, idx):
     dat = np.load(file)
     if idx is not None:  # select volume
         dat = dat[idx, :]
-    
+
     if dat.ndim > 1:
         raise ValueError("Data is 2D! Set --idx explicitly")
 
