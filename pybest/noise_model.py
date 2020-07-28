@@ -161,7 +161,7 @@ def run_noise_processing(ddict, cfg, logger):
 
         # Loop over unique indices
         func, conf, _ = get_run_data(ddict, run, func_type='preproc')
-        nonzero = ~np.all(np.isclose(func, 0.), axis=0)
+        nonzero = ~np.all(np.isclose(func, 0.), axis=0)  # mask
         for this_n_comps in np.unique(opt_n_comps).astype(int):
             # If n_comps is 0, then R2 was negative and we
             # don't want to denoise, so continue
@@ -245,10 +245,11 @@ def _run_parallel_across_runs(ddict, cfg, logger, this_n_comp, cv):
         for run in range(n_runs):
             t_idx = ddict['run_idx'] == run
             this_Y, conf, events = get_run_data(ddict, run=run, func_type='preproc')
-            C = conf[:, :this_n_comp]
+            C = conf[:, :this_n_comp]  # extract first `this_n_comp` columns
             tr = ddict['trs'][run]
             ft = get_frame_times(tr, ddict, cfg, this_Y)
-            
+
+            # create actual DM
             X = create_design_matrix(tr, ft, events, hrf_model=cfg['hrf_model'], hrf_idx=i)
             X = X.drop('constant', axis=1)
             
@@ -260,7 +261,7 @@ def _run_parallel_across_runs(ddict, cfg, logger, this_n_comp, cv):
             Xs.append(X)
             Y[t_idx, :] = this_Y
 
-        # Concatenate across runs
+        # Concatenate across runs + standardize Y
         X = pd.concat(Xs, axis=0).to_numpy()
         Y = signal.clean(Y, detrend=False, standardize='zscore')
 

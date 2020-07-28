@@ -51,7 +51,7 @@ def argmax_regularized(data, axis=0, percent=5):
     """
     # Compute maximum score across axis
     maxx = data.max(axis=axis)
-    # Define cutoff as 5% from maximum (Kay method)
+    # Define cutoff as `percent` from maximum (Kay method)
     cutoff = maxx * (1 - percent / 100.)
     # Some vectorization magic
     if data.ndim == 3:
@@ -152,8 +152,9 @@ def get_frame_times(tr, ddict, cfg, Y):
 def get_param_from_glm(name, labels, results, dm, time_series=False, predictors=False):
     """ Get parameters from a fitted Nilearn GLM. """
     if predictors and time_series:
-        raise ValueError("Cannot get predictors and time series.")
+        raise ValueError("Cannot get predictors *and* time series.")
 
+    # Preallocate
     if time_series:
         data = np.zeros((dm.shape[0], labels.size))
     elif predictors:
@@ -161,6 +162,7 @@ def get_param_from_glm(name, labels, results, dm, time_series=False, predictors=
     else:
         data = np.zeros_like(labels)
 
+    # Extract data
     for lab in np.unique(labels):
         data[..., labels == lab] = getattr(results[lab], name)
 
@@ -254,7 +256,7 @@ def yield_glm_results(vox_idx, Y, X, conf, run, ddict, cfg):
 
     # Pre-allocate optimal number of noise components array (opt_n_comps)
     tr = ddict['trs'][run]
-    if ddict['opt_n_comps'].ndim > 1:
+    if ddict['opt_n_comps'].ndim > 1:  # extract run-specific
         opt_n_comps = ddict['opt_n_comps'][run, :]
     else:
         opt_n_comps = ddict['opt_n_comps']
@@ -264,11 +266,7 @@ def yield_glm_results(vox_idx, Y, X, conf, run, ddict, cfg):
     opt_n_comps = opt_n_comps.astype(int)
 
     nm = cfg['single_trial_noise_model']
-    for this_n_comps in np.unique(opt_n_comps):  # loop across unique n comps
-        # If n_comps is 0, then R2 was negative and we
-        # don't want to denoise, so continue
-        #if this_n_comps == 0:
-        #    continue
+    for this_n_comps in np.unique(opt_n_comps):  # loop across unique opt_n_comps
 
         # Find voxels that correspond to this_n_comps and intersect
         # with given voxel index
@@ -277,16 +275,16 @@ def yield_glm_results(vox_idx, Y, X, conf, run, ddict, cfg):
 
         # Get confound matrix (X_n) ...
         if this_n_comps == 0:
-            C = None
+            C = None  # no need for orthogonalization!
         else:
             C = conf[:, :this_n_comps]
     
         this_X = X.copy()
-        if 'constant' in this_X.columns:
+        if 'constant' in this_X.columns:  # no need for now
             this_X = this_X.drop('constant', axis=1)
         
-        # ... and remove from design (this_X)
-        this_X.loc[:, :], Y = custom_clean(this_X, Y, C, tr, ddict, cfg, standardize=False)
+        # ... and remove from design (this_X); also high-pass
+        this_X.loc[:, :], Y = custom_clean(this_X, Y, C, tr, ddict, cfg, high_pass=True, standardize=False)
         
         # orthogonalize w.r.t. unmodulated regressor
         if 'unmodstim' in this_X.columns:
@@ -295,12 +293,6 @@ def yield_glm_results(vox_idx, Y, X, conf, run, ddict, cfg):
             this_X.loc[:, idx] = signal.clean(this_X.loc[:, idx].to_numpy(),
                                               detrend=False, confounds=unmod_reg,
                                               standardize=False)
-
-            st_idx = this_X.columns.str.contains(cfg['single_trial_id'])
-            this_X.loc[:, st_idx] = this_X.loc[:, st_idx] - this_X.loc[:, st_idx].mean(axis=0)
-
-        # orthogonalize w.r.t. intercept
-        #this_X = this_X - this_X.mean(axis=0)
         
         # Finally, fit actual GLM and yield results
         this_X['constant'] = 1
@@ -335,13 +327,11 @@ def custom_clean(X, Y, C, tr, ddict, cfg, high_pass=True, clean_Y=True, standard
         # Note to self: Y and C are, by definition, already high-pass filtered
         X.loc[:, :] = hp_filter(X.to_numpy(), tr, ddict, cfg, standardize=False)
     
-    if C is not None:
+    if C is not None:  # remove confounds from X
         X.loc[:, :] = signal.clean(X.to_numpy(), detrend=False, standardize=False, confounds=C)
 
-    X = X - X.mean(axis=0)
     if clean_Y:
-        Y = signal.clean(Y, detrend=False, confounds=C,
-                         standardize=standardize)
+        Y = signal.clean(Y, detrend=False, confounds=C, standardize=standardize)
 
     return X, Y
 
