@@ -326,7 +326,7 @@ def custom_clean(X, Y, C, tr, ddict, cfg, high_pass=True, clean_Y=True, standard
     if high_pass:
         # Note to self: Y and C are, by definition, already high-pass filtered
         X.loc[:, :] = hp_filter(X.to_numpy(), tr, ddict, cfg, standardize=False)
-    
+   
     if C is not None:  # remove confounds from X
         X.loc[:, :] = signal.clean(X.to_numpy(), detrend=False, standardize=False, confounds=C)
 

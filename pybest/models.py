@@ -20,7 +20,7 @@ def cross_val_r2(estimator, X, Y, cv, groups=None):
 
     # Pre-allocate R2 array
     r2 = np.zeros(Y.shape[1])
-    for train_idx, test_idx in cv.split(X, Y, groups=groups):
+    for i, (train_idx, test_idx) in enumerate(cv.split(X, Y, groups=groups)):
         X_train, Y_train = X[train_idx], Y[train_idx]
         X_test, Y_test = X[test_idx], Y[test_idx]
         estimator.fit(X_train, Y_train)

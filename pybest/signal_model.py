@@ -7,7 +7,7 @@ from tqdm import tqdm
 from nilearn import masking
 from joblib import Parallel, delayed
 from scipy import stats
-from scipy.linalg import sqrtm
+from scipy.linalg import sqrtm, toeplitz
 from scipy.stats.mstats import rankdata
 from sklearn.model_selection import LeaveOneGroupOut
 from sklearn.linear_model import LinearRegression
@@ -140,13 +140,17 @@ def _run_single_trial_model_parallel(run, best_hrf_idx, ddict, cfg, logger):
     # Pre-allocate residuals and r2
     residuals = np.zeros(Y.shape)
     r2 = np.zeros(Y.shape[1])
-    patterns = np.zeros((len(st_names) + len(cond_names), K))
+    n_reg = len(st_names) + len(cond_names)
+    patterns = np.zeros((n_reg, K))
     preds = np.zeros(Y.shape)
 
     if cfg['contrast'] is not None:
         # ccon = custom contrast
         ccon = np.zeros(K)
 
+    # Save design matrix!
+    varB = np.zeros((n_reg, n_reg, K))
+                        
     # Loop over unique HRF indices (0-20 probably)
     for hrf_idx in tqdm_ctm(np.unique(best_hrf_idx), tdesc(f'Final model run {run+1}:')):
         # Create voxel mask (nonzero ^ hrf index)
@@ -187,17 +191,30 @@ def _run_single_trial_model_parallel(run, best_hrf_idx, ddict, cfg, logger):
                 con = compute_contrast(labels, results, con_val=cvec, contrast_type='t')
                 ccon[this_vox_idx] = getattr(con, STATS[stype])()
 
+            df = this_X.shape[0] - this_X.shape[1]
+            if 'constant' in this_X.columns:
+                this_X = this_X.drop('constant', axis=1)
+
+            X = this_X.to_numpy()
+            sigsq = np.sum((preds[:, this_vox_idx] - Y[:, this_vox_idx]) ** 2, axis=0) / df
+            if cfg['single_trial_noise_model'] == 'ols':
+                varB[:, :, this_vox_idx] = sigsq * np.linalg.inv((X.T @ X))[..., np.newaxis]
+                if cfg['uncorrelation']:
+                    # BROKEN: maybe something like tensordot
+                    patterns[:, this_vox_idx] = sqrtm(np.linalg.inv(varB[:, :, this_vox_idx])) @ patterns[:, this_vox_idx]
+            else:
+                for lab in np.unique(labels):
+                    tmp_idx = this_vox_idx.copy()
+                    tmp_idx[tmp_idx] = labels == lab
+                    V = lab ** toeplitz(np.arange(Y.shape[0]))
+                    varB[:, :, tmp_idx] = sigsq[labels == lab] * np.linalg.inv(X.T @ np.linalg.inv(V) @ X)[..., np.newaxis]
+                    # BROKEN: maybe something like tensordot
+
+                    if cfg['uncorrelation']:
+                        patterns[:, tmp_idx] = sqrtm(np.linalg.inv(varB[:, :, tmp_idx])) @ patterns[:, tmp_idx]            
             # uncorrelation (whiten patterns with covariance of design)
             # https://www.sciencedirect.com/science/article/pii/S1053811919310407
-            if cfg['uncorrelation']:
-                # Covariance matrix without constant!
-                if 'constant' in this_X.columns:
-                    this_X = this_X.drop('constant', axis=1)
 
-                X_ = this_X.to_numpy()
-                D = sqrtm(np.corrcoef(X_.T))  # or covariance?
-                patterns[:, this_vox_idx] = D @ patterns[:, this_vox_idx]
-    
     # Extract single-trial (st) patterns and
     # condition-average patterns (cond)
     if cfg['single_trial_id'] is not None:
@@ -304,10 +321,11 @@ def _run_glmdenoise_model(ddict, cfg, logger):
                 cvec[X.columns.tolist().index(cond)] = 1
                 con = compute_contrast(labels, results, cvec)
                 cond_param[i, vox_idx] = getattr(con, stype)()
-            
-            cvec = expression_to_contrast_vector(cfg['contrast'], X.columns.tolist())
-            con = compute_contrast(labels, results, cvec)
-            ccon_param[vox_idx] = getattr(con, stype)()
+
+            if cfg['contrast'] is not None:
+                cvec = expression_to_contrast_vector(cfg['contrast'], X.columns.tolist())
+                con = compute_contrast(labels, results, cvec)
+                ccon_param[vox_idx] = getattr(con, stype)()
 
     save_data(r2, cfg, ddict, par_dir='best', run=None, desc='model', dtype='r2', nii=True)
     for i, cond in enumerate(conditions):

@@ -3,6 +3,13 @@ import click
 import os.path as op
 import nibabel as nib
 from glob import glob
+
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+os.environ["NUMEXPR_NUM_THREADS"] = "1"
+import numpy as np
+
 from .logging import get_logger
 from .constants import HRF_MODELS
 from .bookkeeping import check_parameters, set_defaults, find_exp_parameters, find_data
@@ -44,7 +51,6 @@ from .signal_model import run_signal_processing
 @click.option('--skip-signalproc', is_flag=True, help='Flag: whether to skip signal processing (only noiseproc)')
 @click.option('--signalproc-type', default='single-trial', type=click.Choice(['single-trial', 'glmdenoise']), help='Type of signal processing (single-trial: LSA/LSS style model, glmdenoise: cross-validated model)')
 @click.option('--contrast', default=None, type=click.STRING, show_default=True, help='Contrast to evaluate (e.g., "4*face - object - place - character - body"); use double quotes!')
-@click.option('--bootstraps', default=100, type=click.INT, show_default=True, help='(Not functional: number of bootstraps to use in glmdenoise style contrast estimation)')
 # 5.1. Single-trial options
 @click.option('--single-trial-id', default=None, type=click.STRING, show_default=True, help='Identifier for single-trial events (e.g., face_)')
 @click.option('--hrf-model', default='glover', type=click.Choice(HRF_MODELS), show_default=True, help='HRF type to use for anything involving HRF convolution')
@@ -60,7 +66,7 @@ from .signal_model import run_signal_processing
 @click.option('--verbose', default='INFO', type=click.Choice(['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']), show_default=True, help='Verbosity level')#
 def main(fprep_dir, bids_dir, out_dir, start_from, ricor_dir, subject, session, pool_sessions, task, space, hemi,
          gm_thresh, slice_time_ref, high_pass_type, high_pass, skip_noiseproc, noise_source, decomp, n_comps, noiseproc_type, cv_repeats, cv_splits,
-         regularize_n_comps, skip_signalproc, signalproc_type, contrast, bootstraps, single_trial_id, hrf_model, single_trial_noise_model,
+         regularize_n_comps, skip_signalproc, signalproc_type, contrast, single_trial_id, hrf_model, single_trial_noise_model,
          regularize_hrf_model, single_trial_model, pattern_units, uncorrelation, smoothing_fwhm, n_cpus, save_all, verbose):
     """ Main API of pybest. """
     

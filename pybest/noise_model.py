@@ -48,7 +48,7 @@ def run_noise_processing(ddict, cfg, logger):
     if cfg['noiseproc_type'] == 'within':
         # Must be > 0
         n_comps = np.arange(1, cfg['n_comps']+1).astype(int)  # range of components to test
-    
+
         # Denoising is done within runs!
         # Maybe add a "meta-seed" to cli options to ensure reproducibility?
         seed = np.random.randint(10e5)
@@ -236,8 +236,8 @@ def _run_parallel_across_runs(ddict, cfg, logger, this_n_comp, cv):
     # Define model (linreg) and cross-validation routine (leave-one-run-out)        
     model = LinearRegression(fit_intercept=False, n_jobs=1)
     # Define fMRI data (Y) and full confound matrix (C)
-    Y = ddict['preproc_func'].copy()
-
+    Y = ddict['preproc_func']
+ 
     # Loop over HRFs
     for i in to_iter:
         Xs = []  # store runwise design matrix
@@ -245,18 +245,26 @@ def _run_parallel_across_runs(ddict, cfg, logger, this_n_comp, cv):
         for run in range(n_runs):
             t_idx = ddict['run_idx'] == run
             this_Y, conf, events = get_run_data(ddict, run=run, func_type='preproc')
-            C = conf[:, :this_n_comp]  # extract first `this_n_comp` columns
             tr = ddict['trs'][run]
             ft = get_frame_times(tr, ddict, cfg, this_Y)
-
+            if this_n_comp == 0:
+                C = None
+            else:
+                C = conf[:, :this_n_comp]  # extract first `this_n_comp` columns
+            
             # create actual DM
             X = create_design_matrix(tr, ft, events, hrf_model=cfg['hrf_model'], hrf_idx=i)
             X = X.drop('constant', axis=1)
-            
+
+            # We can't cross-validate with a single-trial design, so we'll just the
+            # "stimulus intercept" to cross-validate instead
+            if cfg['single_trial_id'] is not None:
+                st_idx = X.columns.str.contains(cfg['single_trial_id'])
+                X['unmodstim'] = X.loc[:, st_idx].sum(axis=1)
+                X = X.loc[:, ['unmodstim']]  # remove single trials
+
             # Filter and remove confounds (C) from both the design matrix (X) and data (Y)
-            if this_n_comp != 0:
-                X.loc[:, :], this_Y = custom_clean(X, this_Y, C, tr, ddict, cfg, clean_Y=True)
-    
+            X.loc[:, :], this_Y = custom_clean(X, this_Y, C, tr, ddict, cfg, clean_Y=True)
             X = X - X.mean(axis=0)
             Xs.append(X)
             Y[t_idx, :] = this_Y
