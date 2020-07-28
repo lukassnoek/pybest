@@ -52,7 +52,10 @@ def preprocess_funcs(ddict, cfg, logger):
     data = np.vstack([d[0] for d in out])
     run_idx = np.concatenate([r[1] for r in out]).astype(int)
 
+    # Save functional data, ALWAYS as npy file (saves time/disk space)
     save_data(data, cfg, ddict, par_dir='preproc', run=None, desc='preproc', dtype='bold')
+
+    # Save run_idx
     out_dir = op.join(cfg['save_dir'], 'preproc')
     np.save(op.join(out_dir, 'run_idx.npy'), run_idx)
 
@@ -61,7 +64,7 @@ def preprocess_funcs(ddict, cfg, logger):
     logger.info(f"Found the following TRs across runs: {ddict['trs']}")
     
     # Save mask
-    save_data(ddict['mask'], cfg, ddict, par_dir='preproc', run=None, desc='preproc', dtype='mask')
+    save_data(ddict['mask'], cfg, ddict, par_dir='preproc', run=None, desc='preproc', dtype='mask', nii=True)
 
     # Store in data-dictionary (ddict)
     ddict['preproc_func'] = data
@@ -87,7 +90,7 @@ def _run_func_parallel(ddict, cfg, run, func, logger):
     run_idx = np.ones(data.shape[0]) * run
 
     if cfg['save_all']:  # Save run-wise data as niftis for inspection
-        save_data(data, cfg, ddict, par_dir='preproc', run=run+1,
+        save_data(data, cfg, ddict, par_dir='preproc', run=run+1, nii=True,
                   desc='preproc', dtype='bold', skip_if_single_run=True)
 
     return data, run_idx, tr
@@ -228,8 +231,9 @@ def preprocess_confs_noise_pool(ddict, cfg, logger):
         data_.append(data)
 
     # Save data to disk
-    save_data(r2_max, cfg, ddict, par_dir='preproc', run=None, desc='max', dtype='r2')
-    save_data(r2_max, cfg, ddict, par_dir='preproc', run=None, desc='max', dtype='r2')
+    save_data(r2_max, cfg, ddict, par_dir='preproc', desc='max', dtype='r2', nii=True)
+    save_data(r2_max, cfg, ddict, par_dir='preproc', desc='max', dtype='r2', nii=True)
+
     if r2.shape[0] > 1:  # also save R2 per HRF    
         save_data(r2, cfg, ddict, par_dir='preproc', run=None, desc='hrf', dtype='r2')
     
@@ -273,8 +277,13 @@ def preprocess_events(ddict, cfg, logger):
             n_st = data.loc[st_idx, :].shape[0]
             
             # Setting a unique trial-type for single trials
-            data.loc[st_idx, 'trial_type'] = [f'{str(i).zfill(3)}_{s}' for i, s in enumerate(data.loc[st_idx, 'trial_type'])]
-
+            if cfg['signalproc_type'] == 'single-trial':
+                data.loc[st_idx, 'trial_type'] = [f'{str(i).zfill(3)}_{s}' for i, s in enumerate(data.loc[st_idx, 'trial_type'])]
+            else:
+                # Not sure this should be the default, but set single trials to the
+                # same condition if you want to do glmdenoise-style cross-validation stuff
+                data.loc[st_idx, 'trial_type'] = 'stim'
+            
             # Some bookkeeping (sorting and stuff)
             n_other = data.loc[~st_idx, 'trial_type'].unique().size
             sort_cols = ['onset', 'duration', 'trial_type', 'run']
@@ -341,23 +350,33 @@ def load_preproc_data(ddict, cfg):
     """ Loads preprocessed data. """
     in_dir = op.join(cfg['save_dir'], 'preproc')
     f_base = cfg['f_base'] + '_desc-preproc_'
-
     f_in = op.join(in_dir, f_base)
-    ddict['mask'] = None if 'fs' in cfg['space'] else nib.load(f_in + 'mask.nii.gz')
 
+    # Load in mask
     if 'fs' in cfg['space']:
-        ddict['preproc_func'] = np.load(f_in + f'bold.npy')
-        ddict['trs'] = [load_gifti(f)[1] for f in ddict['funcs']]
+        ddict['mask'] = None 
     else:
-        ddict['preproc_func'] = masking.apply_mask(f_in + 'bold.nii.gz', ddict['mask'])
+        ddict['mask'] = nib.load(f_in + 'mask.nii.gz')
+
+    # Load in data (bold data always as npy, because fast/efficient)
+    ddict['preproc_func'] = np.load(f_in + 'bold.npy')
+    
+    # Load in TRs (inefficient; maybe save/load as yaml?)
+    if 'fs' in cfg['space']:
+        ddict['trs'] = [load_gifti(f)[1] for f in ddict['funcs']]  # quite inefficient
+    else:
         ddict['trs'] = [nib.load(f).header['pixdim'][4] for f in ddict['funcs']]
 
+    # Load conf
     ddict['preproc_conf'] = pd.read_csv(f_in + 'conf.tsv', sep='\t')
+
+    # Load events (but only if we want to do signalproc)
     if not cfg['skip_signalproc']:
         ddict['preproc_events'] = pd.read_csv(f_in + 'events.tsv', sep='\t')
     else:
         ddict['preproc_events'] = None
 
+    # Load run index (which time point belongs to which run?)
     ddict['run_idx'] = np.load(op.join(in_dir, 'run_idx.npy'))
     
     return ddict

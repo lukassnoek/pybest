@@ -81,7 +81,7 @@ def main(fprep_dir, bids_dir, out_dir, start_from, ricor_dir, subject, session, 
             for task in cfg['task'][i][ii]:
                 
                 if task is None:
-                    # no data for this task in this session, so skip
+                    logger.warn(f"No data for sub-{sub}, ses-{ses} - skipping ...")
                     continue
 
                 s = '' if ses is None else f' ses-{ses},'

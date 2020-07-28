@@ -24,5 +24,5 @@ The only actual obligatory argument is the path to your Fmriprep directory. The 
 
 The other parameters all have sensible defaults (but which you can change as desired). By default, `pybest` will do the following:
 1. Preprocess the functional data (high-pass at 0.01 Hz + standardization) and confounds (high-pass + PCA to extract 50 components);
-2. Perform "within-run" style noise-processing using 5 fold cross-validation and 1-50 noise components for each run separately (no --regularize-n-comps);
-3. Run a least-squares-all (LSA) style using the Glover HRF on the denoised data, but only if --single-trial-id {identifier} is set (e.g. --single-trial-id face_). All events with this identifier in the `trial_type` column in the associated events-file will be treated as a separate trial. All other events are modelled as a condition. The "patterns" are whitened with the design covariance and saved as "betas" (alternative: zscore).
+2. Perform "within-run" style noise-processing using 5 fold cross-validation and 1-50 noise components for each run separately (no `--regularize-n-comps`);
+3. Run a least-squares-all (LSA) style using the Glover HRF on the denoised data, but only if `--single-trial-id {identifier}` is set (e.g. `--single-trial-id face_`). All events with this identifier in the `trial_type` column in the associated events-file will be treated as a separate trial. All other events are modelled as a condition. The "patterns" are whitened with the design covariance and saved as "betas" (alternative: zscore).

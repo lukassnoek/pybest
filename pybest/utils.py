@@ -60,7 +60,8 @@ def argmax_regularized(data, axis=0, percent=5):
     return (data >= cutoff).argmax(axis=axis)
 
 
-def save_data(data, cfg, ddict, par_dir, run, desc, dtype, ext=None, skip_if_single_run=False):
+def save_data(data, cfg, ddict, par_dir, desc, dtype, run=None, ext=None,
+              skip_if_single_run=False, nii=False):
     """ Saves data as either numpy files (for fs* space data) or
     gzipped nifti (.nii.gz; for volumetric data).
 
@@ -72,15 +73,17 @@ def save_data(data, cfg, ddict, par_dir, run, desc, dtype, ext=None, skip_if_sin
         Config dictionary
     par_dir : str
         Name of parent directory ('preproc', 'denoising', 'best')
-    run : int/None
-        Run index (if None, assumed to be a single run)
     desc : str
         Description string (desc-{desc})
     dtype : str
         Type of data (_{dtype}.{npy,nii.gz})
+    run : int/None
+        Run index (if None, assumed to be a single run)
     ext : str
         Extension (to determine how to save the data). If None, assuming
         fMRI data.
+    nii : bool
+        Whether to force saving as nifti (if False, saves as npy)
     """
     
     if data is None:
@@ -103,13 +106,17 @@ def save_data(data, cfg, ddict, par_dir, run, desc, dtype, ext=None, skip_if_sin
         data.to_csv(f_out + '.tsv', sep='\t', index=False)
         return None
 
-    if 'fs' in cfg['space']:  # surface
+    if 'fs' in cfg['space']:  # surface, always save as npy
         np.save(f_out + '.npy', data)
-    else:  # volume
-        if isinstance(data, nib.Nifti1Image):
+    else:  # volume, depends on `nii` arg
+        if nii:  # save as volume
+            if not isinstance(data, nib.Nifti1Image):
+                data = masking.unmask(data, ddict['mask'])
             data.to_filename(f_out + '.nii.gz')
-        else:
-            masking.unmask(data, ddict['mask']).to_filename(f_out + '.nii.gz')
+        else:  # save as npy (faster/less disk space)
+            if isinstance(data, nib.Nifti1Image):
+                data = masking.apply_mask(data, ddict['mask'])
+            np.save(f_out + '.npy', data)
 
 
 def hp_filter(data, tr, ddict, cfg, standardize=True):
@@ -262,8 +269,8 @@ def yield_glm_results(vox_idx, Y, X, conf, run, ddict, cfg):
     for this_n_comps in np.unique(opt_n_comps):  # loop across unique n comps
         # If n_comps is 0, then R2 was negative and we
         # don't want to denoise, so continue
-        if this_n_comps == 0:
-            continue
+        #if this_n_comps == 0:
+        #    continue
 
         # Find voxels that correspond to this_n_comps and intersect
         # with given voxel index
@@ -271,17 +278,34 @@ def yield_glm_results(vox_idx, Y, X, conf, run, ddict, cfg):
         this_vox_idx = np.logical_and(vox_idx, this_vox_idx)
 
         # Get confound matrix (X_n) ...
-        C = conf[:, :this_n_comps]
+        if this_n_comps == 0:
+            C = None
+        else:
+            C = conf[:, :this_n_comps]
+    
         this_X = X.copy()
         if 'constant' in this_X.columns:
-            X = X.drop('constant', axis=1)
+            this_X = this_X.drop('constant', axis=1)
         
         # ... and remove from design (this_X)
         this_X.loc[:, :], Y = custom_clean(this_X, Y, C, tr, ddict, cfg, standardize=False)
-        # orthogonalize w.r.t. intercept
-        this_X = this_X - this_X.mean(axis=0)
+        
+        # orthogonalize w.r.t. unmodulated regressor
+        if 'unmodstim' in this_X.columns:
+            idx = ~this_X.columns.str.contains('unmodstim')
+            unmod_reg = this_X.loc[:, ~idx].to_numpy()
+            this_X.loc[:, idx] = signal.clean(this_X.loc[:, idx].to_numpy(),
+                                              detrend=False, confounds=unmod_reg,
+                                              standardize=False)
 
+            st_idx = this_X.columns.str.contains(cfg['single_trial_id'])
+            this_X.loc[:, st_idx] = this_X.loc[:, st_idx] - this_X.loc[:, st_idx].mean(axis=0)
+
+        # orthogonalize w.r.t. intercept
+        #this_X = this_X - this_X.mean(axis=0)
+        
         # Finally, fit actual GLM and yield results
+        this_X['constant'] = 1
         labels, results = run_glm(Y[:, this_vox_idx], this_X.to_numpy(), noise_model=nm)
         yield this_vox_idx, this_X, labels, results
 
@@ -310,10 +334,12 @@ def custom_clean(X, Y, C, tr, ddict, cfg, high_pass=True, clean_Y=True, standard
         X = X.drop('constant', axis=1)
 
     if high_pass:
-        # Note to self: Y and C are already high-pass filtered
+        # Note to self: Y and C are, by definition, already high-pass filtered
         X.loc[:, :] = hp_filter(X.to_numpy(), tr, ddict, cfg, standardize=False)
     
-    X.loc[:, :] = signal.clean(X.to_numpy(), detrend=False, standardize=False)
+    if C is not None:
+        X.loc[:, :] = signal.clean(X.to_numpy(), detrend=False, standardize=False, confounds=C)
+
     X = X - X.mean(axis=0)
     if clean_Y:
         Y = signal.clean(Y, detrend=False, confounds=C, standardize=standardize)

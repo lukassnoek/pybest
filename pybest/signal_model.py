@@ -1,5 +1,5 @@
 import os
-import matplotlib
+import matplotlib.pyplot as plt
 import os.path as op
 import numpy as np
 import pandas as pd
@@ -28,9 +28,9 @@ def run_signal_processing(ddict, cfg, logger):
     
     if cfg['skip_signalproc']:
         logger.warn("Skipping signal processing (because of --skip-signalproc)")
-        return 0
+        return None
 
-    logger.info(f"Starting signal analysis.")
+    logger.info(f"Starting signal analysis")
 
     if cfg['signalproc_type'] == 'single-trial':
         _run_single_trial_model(ddict, cfg, logger)
@@ -40,10 +40,14 @@ def run_signal_processing(ddict, cfg, logger):
 
 def _run_single_trial_model(ddict, cfg, logger):
     """ Single-trial estimation. """
+
+    logger.info(f"Running single-trial estimation")
+
     n_runs = np.unique(ddict['run_idx']).size
     K = ddict['denoised_func'].shape[1]
 
     if cfg['hrf_model'] == 'kay':  # try to optimize HRF selection
+        logger.info(f"Going to optimize the HRF (using Kay's 20-HRF basis set)")
         # First, get R2 values for each HRF-based model (20 in total)
         # r2: list (n_runs) of 2D (20 x voxels) arrays
         r2 = Parallel(n_jobs=cfg['n_cpus'])(delayed(_optimize_hrf_within)
@@ -58,6 +62,7 @@ def _run_single_trial_model(ddict, cfg, logger):
         r2 = np.stack(r2)
 
         if cfg['regularize_hrf_model']:  # same voxel-specific HRF for each run
+            logger.info("Regularizing HRF model")
             # IDEA: variance-weighted? So (r2_mean / r2_std).argmax(axis=0)?
             # IDEA: rank-transform per run
             r2_median = np.median(r2 - r2.mean(axis=0), axis=0)  # median across runs
@@ -65,7 +70,7 @@ def _run_single_trial_model(ddict, cfg, logger):
             # 1D array of size K (voxels) with best HRF index
             best_hrf_idx = r2_median.argmax(axis=0).astype(int)
 
-            if cfg['save_all']:
+            if cfg['save_all']:  # save per-run statistics
                 save_data(r2_median, cfg, ddict, par_dir='best', run=None, desc='hrf', dtype='r2')
                 save_data(best_hrf_idx, cfg, ddict, par_dir='best', run=None, desc='opt', dtype='hrf')
         else:  # specific HRF for each voxel and run (2D array: runs x voxels)
@@ -106,7 +111,10 @@ def _optimize_hrf_within(run, ddict, cfg, logger):
 def _run_single_trial_model_parallel(run, best_hrf_idx, ddict, cfg, logger):
     """ Fits a single trial model, possibly using an optimized HRF. """
     Y, conf, events = get_run_data(ddict, run, func_type='denoised')
+    K = Y.shape[1]
     tr = ddict['trs'][run]
+
+    # ft = frame times (Nilearn lingo)
     ft = get_frame_times(tr, ddict, cfg, Y)
     nonzero = ~np.all(np.isclose(Y, 0.), axis=0)
 
@@ -116,9 +124,11 @@ def _run_single_trial_model_parallel(run, best_hrf_idx, ddict, cfg, logger):
     else:
         st_idx = events['trial_type'].str.contains(cfg['single_trial_id'])
     
-    # What are the names of the single-trials (st) and other conditions?
+    # What are the names of the single-trials (st) and other conditions (cond)?
     st_names = events.loc[st_idx, 'trial_type']
     cond_names = events.loc[~st_idx, 'trial_type'].unique().tolist()
+    if cfg['single_trial_id'] is not None:
+        cond_names += ['unmodstim']
 
     if best_hrf_idx.ndim > 1:  # run-specific HRF
         best_hrf_idx = best_hrf_idx[run, :]
@@ -126,15 +136,17 @@ def _run_single_trial_model_parallel(run, best_hrf_idx, ddict, cfg, logger):
     # Pre-allocate residuals and r2
     residuals = np.zeros(Y.shape)
     r2 = np.zeros(Y.shape[1])
-    patterns = np.zeros((events['trial_type'].unique().size , Y.shape[1]))
-
+    # Note to self: the +1 is from the stim_unmod regressor
+    patterns = np.zeros((len(st_names) + len(cond_names), K))
+    
     if cfg['single_trial_model'] == 'lsa':
         preds = np.zeros(Y.shape)
-        st_icept = np.zeros(Y.shape[1])
+        preds_icept = np.zeros(Y.shape)
+        #st_icept = np.zeros(K)
     
     if cfg['contrast'] is not None:
         # ccon = custom contrast
-        ccon = np.zeros(Y.shape[1])
+        ccon = np.zeros(K)
 
     # Loop over unique HRF indices (0-20 probably)
     for hrf_idx in tqdm_ctm(np.unique(best_hrf_idx), tdesc(f'Final model run {run+1}:')):
@@ -145,10 +157,13 @@ def _run_single_trial_model_parallel(run, best_hrf_idx, ddict, cfg, logger):
         if cfg['single_trial_model'] == 'lsa':  # least-squares all
             # Get current design matrix, hp-filter, and start noise loop
             X = create_design_matrix(tr, ft, events, hrf_model=cfg['hrf_model'], hrf_idx=hrf_idx)
-            X = X.iloc[:, :-1]
+            X = X.drop('constant', axis=1)
 
             if cfg['single_trial_id'] is not None:
                 st_idx_x = X.columns.str.contains(cfg['single_trial_id'])
+                # Add "unmodulated stimulus" regressor
+                X['unmodstim'] = X.loc[:, st_idx_x].sum(axis=1)
+                st_idx_x = np.r_[st_idx_x, False]
 
             # Loop across unique n comps
             for out in yield_glm_results(vox_idx, Y, X, conf, run, ddict, cfg):                
@@ -157,34 +172,46 @@ def _run_single_trial_model_parallel(run, best_hrf_idx, ddict, cfg, logger):
                 residuals[:, this_vox_idx] = get_param_from_glm('residuals', labels, results, this_X, time_series=True)
                 preds[:, this_vox_idx] = get_param_from_glm('predicted', labels, results, this_X, time_series=True)
                 r2[this_vox_idx] = get_param_from_glm('r_square', labels, results, this_X, time_series=False)
+                beta = get_param_from_glm('theta', labels, results, this_X, time_series=False, predictors=True)
+                preds_icept[:, this_vox_idx] = this_X.iloc[:, -2:].to_numpy() @ beta[-2:, :]
 
                 # Loop over columns to extract parameters/zscores
                 for i, col in enumerate(this_X.columns):
+                    if col == 'constant':
+                        continue
+
                     cvec = np.zeros(this_X.shape[1])
                     cvec[this_X.columns.tolist().index(col)] = 1
-                    con = compute_contrast(labels, results, con_val=np.roll(cvec, shift=1), contrast_type='t')
+                    con = compute_contrast(labels, results, con_val=cvec, contrast_type='t')
                     patterns[i, this_vox_idx] = getattr(con, STATS[cfg['pattern_units']])()
 
-                # Get "intercept" (average effect) of single-trials
-                if cfg['single_trial_id'] is not None:
-                    cvec = np.zeros(this_X.shape[1])
-                    cvec[st_idx_x] = 1  # set all single-trial columns to 1 in contrast-vec
-                    con = compute_contrast(labels, results, con_val=cvec, contrast_type='t')
-                    st_icept[this_vox_idx] = getattr(con, STATS[cfg['pattern_units']])()
-
-                # uncorrelation (whiten patterns with covariance of design)
-                # https://www.sciencedirect.com/science/article/pii/S1053811919310407
-                if cfg['uncorrelation']:
-                    X_ = this_X.iloc[:, :-1].to_numpy()
-                    D = sqrtm(np.cov(X_.T))
-                    patterns[:, this_vox_idx] = D @ patterns[:, this_vox_idx]
+                ## Get "intercept" (average effect) of single-trials
+                #if cfg['single_trial_id'] is not None:
+                #    cvec = np.zeros(this_X.shape[1])
+                #    cvec[st_idx_x] = 1  # set all single-trial columns to 1 in contrast-vec
+                #    con = compute_contrast(labels, results, con_val=cvec, contrast_type='t')
+                #    st_icept[this_vox_idx] = getattr(con, STATS[cfg['pattern_units']])()
 
                 # Evaluate "custom contrast" if there is any
                 if cfg['contrast'] is not None:
                     cvec = expression_to_contrast_vector(cfg['contrast'], this_X.columns.tolist())
                     con = compute_contrast(labels, results, con_val=cvec, contrast_type='t')
                     ccon[this_vox_idx] = getattr(con, STATS[cfg['pattern_units']])()
-        else:  # Least-squares separate
+
+                # uncorrelation (whiten patterns with covariance of design)
+                # https://www.sciencedirect.com/science/article/pii/S1053811919310407
+                if cfg['uncorrelation']:
+                    if 'constant' in this_X.columns:
+                        this_X = this_X.drop('constant', axis=1)
+
+                    #if 'unmodstim' in this_X.columns:
+                    #    this_X = this_X.drop('unmodstim', axis=1)
+
+                    X_ = this_X.to_numpy()
+                    D = sqrtm(np.corrcoef(X_.T))
+                    patterns[:, this_vox_idx] = D @ patterns[:, this_vox_idx]
+
+        else:  # Least-squares separate (LSS)
             
             if len(st_names) == 0:
                 raise ValueError("Probably not wise to do LSS without single trials")
@@ -196,7 +223,7 @@ def _run_single_trial_model_parallel(run, best_hrf_idx, ddict, cfg, logger):
                 events_cp.loc[events_cp['trial_type'] == st_name, 'trial_type'] = 'X'
                 events_cp.loc[events_cp['trial_type'].str.contains(cfg['single_trial_id']), 'trial_type'] = 'O'
                 X = create_design_matrix(tr, ft, events_cp, hrf_model=cfg['hrf_model'], hrf_idx=hrf_idx)
-                X = X.iloc[:, :-1]
+                X = X.drop('constant', axis=1)
 
                 # Loop across unique n comps
                 for out in yield_glm_results(vox_idx, Y, X, conf, run, ddict, cfg):
@@ -244,33 +271,36 @@ def _run_single_trial_model_parallel(run, best_hrf_idx, ddict, cfg, logger):
     stype = cfg['pattern_units']
     if cfg['single_trial_id'] is not None:
         st_patterns = patterns[st_idx_x, :]
-        save_data(st_patterns, cfg, ddict, par_dir='best', run=run+1, desc='trial', dtype=stype)
+        save_data(st_patterns, cfg, ddict, par_dir='best', run=run+1, desc='trial', dtype=stype, nii=True)
         cond_patterns = patterns[~st_idx_x, :]
     else:
         cond_patterns = patterns
 
     # Only save single-trial stimulus intercept if there are single trials
-    if cfg['single_trial_id'] is not None:
-        save_data(st_icept, cfg, ddict, par_dir='best', run=run+1, desc='stimicept', dtype=stype)
+    #if cfg['single_trial_id'] is not None:
+    #    save_data(st_icept, cfg, ddict, par_dir='best', run=run+1, desc='stimicept', dtype=stype, nii=True)
 
     # Save each parameter/statistic of the other conditions
     for i, name in enumerate(cond_names):    
-        save_data(cond_patterns[i, :], cfg, ddict, par_dir='best', run=run+1, desc=name, dtype=stype)
+        save_data(cond_patterns[i, :], cfg, ddict, par_dir='best', run=run+1, desc=name, dtype=stype, nii=True)
 
     # Always save residuals
-    save_data(residuals, cfg, ddict, par_dir='best', run=run+1, desc='model', dtype='residuals')
+    save_data(residuals, cfg, ddict, par_dir='best', run=run+1, desc='model', dtype='residuals', nii=True)
 
     # In case of LSA, also save predicted values
     if cfg['single_trial_model'] == 'lsa':
-        if cfg['save_all']:
-            save_data(preds, cfg, ddict, par_dir='best', run=run+1, desc='model', dtype='predicted')    
+        save_data(preds, cfg, ddict, par_dir='best', run=run+1, desc='model', dtype='predicted', nii=True)    
+        save_data(preds_icept, cfg, ddict, par_dir='best', run=run+1, desc='model', dtype='predictedicept', nii=True)
+        tmp = np.ones_like(patterns)
+        tmp *= patterns[-1, :]
+        save_data(tmp, cfg, ddict, par_dir='best', run=run+1, desc='model', dtype='predictedunmod', nii=True)
 
     # Always save R2
-    save_data(r2, cfg, ddict, par_dir='best', run=run+1, desc='model', dtype='r2')
+    save_data(r2, cfg, ddict, par_dir='best', run=run+1, desc='model', dtype='r2', nii=True)
 
     # Save custom contrast (--contrast)
     if cfg['contrast'] is not None:
-        save_data(custom_contrast, cfg, ddict, par_dir='best', run=run+1, desc='customcontrast', dtype=stype)
+        save_data(custom_contrast, cfg, ddict, par_dir='best', run=run+1, desc='customcontrast', dtype=stype, nii=True)
 
 
 def _run_glmdenoise_model(ddict, cfg, logger):
