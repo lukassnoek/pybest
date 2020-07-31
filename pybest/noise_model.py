@@ -76,7 +76,7 @@ def run_noise_processing(ddict, cfg, logger):
             # Use de-meaned median score to selected cutoff
             r2_median_tmp = np.median(r2 - r2.mean(axis=0), axis=0)  # median across runs
 
-            opt_n_comps_idx = argmax_regularized(r2_median_tmp, axis=0)
+            opt_n_comps_idx = argmax_regularized(r2_median_tmp, axis=0, percent=cfg['argmax_percent'])
             opt_n_comps = n_comps[opt_n_comps_idx.astype(int)]
             opt_n_comps[r2_max < 0] = 0
             ddict['opt_n_comps'] = opt_n_comps
@@ -88,7 +88,7 @@ def run_noise_processing(ddict, cfg, logger):
                 save_data(r2_ncomps, cfg, ddict, par_dir='denoising', run=run+1, nii=True, desc='ncomps', dtype='r2')
         else:
             # Per-run optimal n-comps
-            ddict['opt_n_comps'] = n_comps[argmax_regularized(r2, axis=1)]
+            ddict['opt_n_comps'] = n_comps[argmax_regularized(r2, axis=1, percent=cfg['argmax_percent'])]
             
             # Determine, per runs, the optimal number of noise comps
             for run in range(n_runs):
@@ -126,7 +126,7 @@ def run_noise_processing(ddict, cfg, logger):
         r2_max = r2_ncomps.max(axis=0)
 
         # Find optimal number of components and HRF index
-        opt_n_comps = n_comps[argmax_regularized(r2_ncomps, axis=0)]
+        opt_n_comps = n_comps[argmax_regularized(r2_ncomps, axis=0, percent=cfg['argmax_percent'])]
         opt_n_comps[r2_max < 0] = 0
         opt_hrf_idx = np.zeros(K)
 
@@ -236,7 +236,7 @@ def _run_parallel_across_runs(ddict, cfg, logger, this_n_comp, cv):
     # Define model (linreg) and cross-validation routine (leave-one-run-out)        
     model = LinearRegression(fit_intercept=False, n_jobs=1)
     # Define fMRI data (Y) and full confound matrix (C)
-    Y = ddict['preproc_func']
+    Y = ddict['preproc_func'].copy()
  
     # Loop over HRFs
     for i in to_iter:

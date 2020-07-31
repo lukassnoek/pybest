@@ -1,20 +1,19 @@
 import os
-import matplotlib.pyplot as plt
 import os.path as op
 import numpy as np
 import pandas as pd
+import matplotlib.pyplot as plt
 from tqdm import tqdm
 from nilearn import masking
 from joblib import Parallel, delayed
 from scipy import stats
 from scipy.linalg import sqrtm, toeplitz
-from scipy.stats.mstats import rankdata
 from sklearn.model_selection import LeaveOneGroupOut
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import r2_score
-from nilearn._utils.glm import z_score
 from nilearn.glm.first_level import run_glm
 from nilearn.glm.contrasts import compute_contrast, expression_to_contrast_vector
+
 from .logging import tqdm_ctm, tdesc
 from .utils import get_run_data, get_frame_times, get_param_from_glm, yield_glm_results
 from .utils import hp_filter, create_design_matrix, save_data, custom_clean
@@ -141,15 +140,15 @@ def _run_single_trial_model_parallel(run, best_hrf_idx, ddict, cfg, logger):
     residuals = np.zeros(Y.shape)
     r2 = np.zeros(Y.shape[1])
     n_reg = len(st_names) + len(cond_names)
-    patterns = np.zeros((n_reg, K))
+    patterns = np.zeros((n_reg + 1, K))
     preds = np.zeros(Y.shape)
 
     if cfg['contrast'] is not None:
         # ccon = custom contrast
         ccon = np.zeros(K)
 
-    # Save design matrix!
-    varB = np.zeros((n_reg, n_reg, K))
+    # Save design matrix! (+1 for constant)
+    varB = np.zeros((n_reg + 1, n_reg + 1, K))
                         
     # Loop over unique HRF indices (0-20 probably)
     for hrf_idx in tqdm_ctm(np.unique(best_hrf_idx), tdesc(f'Final model run {run+1}:')):
@@ -163,23 +162,25 @@ def _run_single_trial_model_parallel(run, best_hrf_idx, ddict, cfg, logger):
 
         if cfg['single_trial_id'] is not None:
             st_idx_x = X.columns.str.contains(cfg['single_trial_id'])
+            st_idx_x = np.r_[st_idx_x, False]  # constant
+
+        if 'unmodstim' in cond_names:
             # Add "unmodulated stimulus" regressor
             X['unmodstim'] = X.loc[:, st_idx_x].sum(axis=1)
             st_idx_x = np.r_[st_idx_x, False]  # this is not a single trial reg.
 
         # Loop across unique opt_n_comps
-        for out in yield_glm_results(vox_idx, Y, X, conf, run, ddict, cfg):                
+        for out in yield_glm_results(vox_idx, Y, X, conf, run, ddict, cfg):
             this_vox_idx, this_X, labels, results = out
             # Extract residuals, predictions, and r2
             residuals[:, this_vox_idx] = get_param_from_glm('residuals', labels, results, this_X, time_series=True)
             preds[:, this_vox_idx] = get_param_from_glm('predicted', labels, results, this_X, time_series=True)
             r2[this_vox_idx] = get_param_from_glm('r_square', labels, results, this_X, time_series=False)
 
+            beta = get_param_from_glm('theta', labels, results, this_X, predictors=True)
+            
             # Loop over columns to extract parameters/zscores
             for i, col in enumerate(this_X.columns):
-                if col == 'constant':
-                    continue
-
                 cvec = np.zeros(this_X.shape[1])
                 cvec[this_X.columns.tolist().index(col)] = 1
                 con = compute_contrast(labels, results, con_val=cvec, contrast_type='t')
@@ -191,32 +192,37 @@ def _run_single_trial_model_parallel(run, best_hrf_idx, ddict, cfg, logger):
                 con = compute_contrast(labels, results, con_val=cvec, contrast_type='t')
                 ccon[this_vox_idx] = getattr(con, STATS[stype])()
 
-            df = this_X.shape[0] - this_X.shape[1]
-            if 'constant' in this_X.columns:
-                this_X = this_X.drop('constant', axis=1)
+            for lab in np.unique(labels):
+                r = results[lab]
+                # dispersion = sigsq, cov = cov = inv(X.T @ X)
+                tmp_idx = np.zeros(K, dtype=bool)
+                tmp_idx[this_vox_idx] = labels == lab
+                #varB[:, :, tmp_idx] = r.dispersion * r.cov[..., np.newaxis]
+                # For now, do not incorporate dispersion/sigsq
+                varB[:, :, tmp_idx] = r.cov[..., np.newaxis]
 
-            X = this_X.to_numpy()
-            sigsq = np.sum((preds[:, this_vox_idx] - Y[:, this_vox_idx]) ** 2, axis=0) / df
-            if cfg['single_trial_noise_model'] == 'ols':
-                varB[:, :, this_vox_idx] = sigsq * np.linalg.inv((X.T @ X))[..., np.newaxis]
                 if cfg['uncorrelation']:
-                    # BROKEN: maybe something like tensordot
-                    patterns[:, this_vox_idx] = sqrtm(np.linalg.inv(varB[:, :, this_vox_idx])) @ patterns[:, this_vox_idx]
-            else:
-                for lab in np.unique(labels):
-                    tmp_idx = this_vox_idx.copy()
-                    tmp_idx[tmp_idx] = labels == lab
-                    V = lab ** toeplitz(np.arange(Y.shape[0]))
-                    varB[:, :, tmp_idx] = sigsq[labels == lab] * np.linalg.inv(X.T @ np.linalg.inv(V) @ X)[..., np.newaxis]
-                    # BROKEN: maybe something like tensordot
+                    D = sqrtm(np.linalg.inv(r.cov[:-1, :-1]))
+                    patterns[:-1, tmp_idx] = D @ patterns[:-1, tmp_idx]
 
-                    if cfg['uncorrelation']:
-                        patterns[:, tmp_idx] = sqrtm(np.linalg.inv(varB[:, :, tmp_idx])) @ patterns[:, tmp_idx]            
-            # uncorrelation (whiten patterns with covariance of design)
-            # https://www.sciencedirect.com/science/article/pii/S1053811919310407
+    # uncorrelation (whiten patterns with covariance of design)
+    # https://www.sciencedirect.com/science/article/pii/S1053811919310407
+    # if cfg['uncorrelation']:
+    #     logger.info("Prewhitening the patterns ('uncorrelation')")
+    #     # Must be a way to do this without a loop?
+    #     #nonzero = ~np.all(np.isclose(Y, 0.), axis=0)
+    #     for vx in tqdm(range(K)):
+    #         if np.isclose(varB.sum(), 0.0):
+    #             continue
+
+    #         D = sqrtm(np.linalg.inv(varB[:-1, :-1, vx]))
+    #         patterns[:-1, vx] = np.squeeze(D @ patterns[:-1, vx, np.newaxis])
 
     # Extract single-trial (st) patterns and
     # condition-average patterns (cond)
+
+    #save_data(preds_icept, cfg, ddict, par_dir='best', run=run+1, desc='model', dtype='predsicept', nii=True)
+
     if cfg['single_trial_id'] is not None:
         st_patterns = patterns[st_idx_x, :]
         save_data(st_patterns, cfg, ddict, par_dir='best', run=run+1, desc='trial', dtype=stype, nii=True)
@@ -225,7 +231,7 @@ def _run_single_trial_model_parallel(run, best_hrf_idx, ddict, cfg, logger):
         cond_patterns = patterns
 
     # Save each parameter/statistic of the other conditions
-    for i, name in enumerate(cond_names):
+    for i, name in enumerate(cond_names + ['constant']):
         save_data(cond_patterns[i, :], cfg, ddict, par_dir='best', run=run+1, desc=name, dtype=stype, nii=True)
 
     # Always save residuals
@@ -240,6 +246,8 @@ def _run_single_trial_model_parallel(run, best_hrf_idx, ddict, cfg, logger):
     # Save custom contrast (--contrast)
     if cfg['contrast'] is not None:
         save_data(ccon, cfg, ddict, par_dir='best', run=run+1, desc='customcontrast', dtype=stype, nii=True)
+
+    np.save(op.join(cfg['save_dir'], 'best', cfg['f_base'] + f'_run-{run+1}_desc-trial_cov.npy'), varB)
 
 
 def _run_glmdenoise_model(ddict, cfg, logger):
@@ -284,7 +292,7 @@ def _run_glmdenoise_model(ddict, cfg, logger):
     # Loop over HRF indices
     for hrf_idx in np.unique(opt_hrf_idx).astype(int):            
         # Loop over n-components
-        for n_comp in np.unique(opt_n_comps):
+        for n_comp in np.unique(opt_n_comps).astype(int):
             # Determine voxel index (intersection nonzero and the voxels that 
             # were denoised with the current n_comp)
             vox_idx = opt_n_comps == n_comp
@@ -317,9 +325,9 @@ def _run_glmdenoise_model(ddict, cfg, logger):
             r2[vox_idx] = get_param_from_glm('r_square', labels, results, X, time_series=False)
 
             for i, cond in enumerate(conditions):
-                cvec = np.zeros(len(conditions))
+                cvec = np.zeros(X.shape[1])
                 cvec[X.columns.tolist().index(cond)] = 1
-                con = compute_contrast(labels, results, cvec)
+                con = compute_contrast(labels, results, con_val=cvec, contrast_type='t')
                 cond_param[i, vox_idx] = getattr(con, stype)()
 
             if cfg['contrast'] is not None:

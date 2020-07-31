@@ -192,6 +192,9 @@ def create_design_matrix(tr, frame_times, events, hrf_model='kay', hrf_idx=None)
         dms = []  # will store all design matrices
         for hrf_idx in to_iter:  # iterate across all HRFs
             hrf = HRFS_HR[:, hrf_idx]
+            # scale HRF to have the same max as the glover HRF
+            # makes comparison easier
+            hrf /= (hrf.max() / 0.249007)
 
             # Get info
             trial_type, onset, duration, modulation = check_events(events)
@@ -283,9 +286,6 @@ def yield_glm_results(vox_idx, Y, X, conf, run, ddict, cfg):
         if 'constant' in this_X.columns:  # no need for now
             this_X = this_X.drop('constant', axis=1)
         
-        # ... and remove from design (this_X); also high-pass
-        this_X.loc[:, :], Y = custom_clean(this_X, Y, C, tr, ddict, cfg, high_pass=True, standardize=False)
-        
         # orthogonalize w.r.t. unmodulated regressor
         if 'unmodstim' in this_X.columns:
             idx = ~this_X.columns.str.contains('unmodstim')
@@ -294,6 +294,9 @@ def yield_glm_results(vox_idx, Y, X, conf, run, ddict, cfg):
                                               detrend=False, confounds=unmod_reg,
                                               standardize=False)
         
+        # ... and remove from design (this_X); also high-pass
+        this_X.loc[:, :], Y = custom_clean(this_X, Y, C, tr, ddict, cfg, high_pass=True, standardize=False)
+
         # Finally, fit actual GLM and yield results
         this_X['constant'] = 1
         labels, results = run_glm(Y[:, this_vox_idx], this_X.to_numpy(), noise_model=nm)
@@ -331,7 +334,7 @@ def custom_clean(X, Y, C, tr, ddict, cfg, high_pass=True, clean_Y=True, standard
         X.loc[:, :] = signal.clean(X.to_numpy(), detrend=False, standardize=False, confounds=C)
 
     if clean_Y:
-        Y = signal.clean(Y, detrend=False, confounds=C, standardize=standardize)
+        Y = signal.clean(Y.copy(), detrend=False, confounds=C, standardize=standardize)
 
     return X, Y
 
