@@ -87,7 +87,7 @@ def find_exp_parameters(cfg, logger):
     """ Extracts experimental parameters. """
 
     hemi, space = cfg['hemi'], cfg['space']
-    space_idf = f'hemi-{hemi}.func.gii' if 'fs' in space else 'desc-preproc_bold.nii.gz'
+    space_idf = f'hemi-{hemi}*.func.gii' if 'fs' in space else 'desc-preproc_bold.nii.gz'
 
     # Use all possible participants if not provided
     if cfg['subject'] is None:
@@ -164,7 +164,7 @@ def find_exp_parameters(cfg, logger):
                         cfg['fprep_dir'],
                         f'sub-{this_sub}',
                         'func',
-                        f"*task-{cfg['task']}*_space-{cfg['space']}*_{space_idf}"
+                        f"*task-{cfg['task']}_*_space-{cfg['space']}*_{space_idf}"
                     ))
                 else:
                     tmp = glob(op.join(
@@ -172,7 +172,7 @@ def find_exp_parameters(cfg, logger):
                         f'sub-{this_sub}',
                         f'ses-{this_ses}',
                         'func',
-                        f"*task-{cfg['task']}*_space-{cfg['space']}*_{space_idf}"
+                        f"*task-{cfg['task']}_*_space-{cfg['space']}*_{space_idf}"
                     ))
                 if tmp:
                     these_task.append([cfg['task']])
@@ -200,7 +200,7 @@ def find_data(cfg, logger):
         ses = '*'  # wilcard for globbing across sessions
 
     # idf = identifier for files
-    idf = f'hemi-{hemi}.func.gii' if 'fs' in space else 'desc-preproc_bold.nii.gz'
+    idf = f'hemi-{hemi}*.func.gii' if 'fs' in space else 'desc-preproc_bold.nii.gz'
 
     # Gather funcs, confs, tasks
     fprep_dir = cfg['fprep_dir']
@@ -226,7 +226,7 @@ def find_data(cfg, logger):
         else:
             bfunc_dir = op.join(bids_dir, f'sub-{sub}', f'ses-{ses}', 'func')
 
-        events = sorted(glob(op.join(bfunc_dir, f'*task-{task}*_events.tsv')))
+        events = sorted(glob(op.join(bfunc_dir, f'*task-{task}_*events.tsv')))
 
         if len(events) == 0:
             logger.warning(
@@ -255,7 +255,7 @@ def find_data(cfg, logger):
     ricor_dir = cfg['ricor_dir']
     if ricor_dir is not None:
         ricors = sorted(glob(op.join(
-            ricor_dir, f'sub-{sub}', f'ses-{ses}', 'physio', f'*task-{task}*regressors.tsv'
+            ricor_dir, f'sub-{sub}', f'ses-{ses}', 'physio', f'*task-{task}_*regressors.tsv'
         )))
         logger.info(f"Found {len(ricors)} RETROICOR files for task {task}")
     else:
