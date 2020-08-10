@@ -38,6 +38,7 @@ from .signal_model import run_signal_processing
 @click.option('--slice-time-ref', type=click.FLOAT, default=0.5, show_default=True, help='Slice to adjust event onsets to (depends on slice-time correction)')
 @click.option('--high-pass-type', type=click.Choice(['dct', 'savgol']), default='dct', show_default=True, help='Type high-pass filter')
 @click.option('--high-pass', default=0.01, show_default=True, help='High-pass cutoff in Hz')
+@click.option('--trial-filter', type=click.STRING, help='String to pass to DataFrame.query to filter trials')
 # 4. Noiseproc options
 @click.option('--skip-noiseproc', is_flag=True, help='Flag: whether to skip noiseprocessing (mainly used to testing/debugging)')
 @click.option('--noise-source', default='fmriprep', type=click.Choice(['fmriprep', 'noisepool']), help='Source of noise predictor (fmriprep: confound.tsv files, noisepool: GLMdenoise style noise pool estimation)')
@@ -66,9 +67,10 @@ from .signal_model import run_signal_processing
 @click.option('--save-all', is_flag=True, help='Save more outputs than strictly necessary (but nice to inspect your data in detail)')
 @click.option('--verbose', default='INFO', type=click.Choice(['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']), show_default=True, help='Verbosity level')#
 def main(fprep_dir, bids_dir, out_dir, start_from, ricor_dir, subject, session, pool_sessions, task, space, hemi,
-         gm_thresh, slice_time_ref, high_pass_type, high_pass, skip_noiseproc, noise_source, decomp, n_comps, noiseproc_type, cv_repeats, cv_splits,
-         regularize_n_comps, argmax_percent, skip_signalproc, signalproc_type, contrast, single_trial_id, hrf_model, single_trial_noise_model,
-         regularize_hrf_model, single_trial_model, pattern_units, uncorrelation, smoothing_fwhm, n_cpus, save_all, verbose):
+         gm_thresh, slice_time_ref, high_pass_type, high_pass, trial_filter, skip_noiseproc, noise_source, decomp, n_comps,
+         noiseproc_type, cv_repeats, cv_splits, regularize_n_comps, argmax_percent, skip_signalproc, signalproc_type, contrast,
+         single_trial_id, hrf_model, single_trial_noise_model, regularize_hrf_model, single_trial_model, pattern_units, uncorrelation,
+         smoothing_fwhm, n_cpus, save_all, verbose):
     """ Main API of pybest. """
     
     ##### set + check parameters #####

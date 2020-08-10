@@ -103,7 +103,7 @@ def run_noise_processing(ddict, cfg, logger):
                     opt_n_comps = ddict['opt_n_comps'][run, :]
                     to_save = [(r2_ncomps, 'ncomps', 'r2'), (r2_max, 'max', 'r2'), (opt_n_comps, 'opt', 'ncomps')]
                     for data, desc, dtype in to_save:
-                        save_data(data, cfg, ddict, par_dir='denoising', run=run+1, desc=desc, dtype=dtype)
+                        save_data(data, cfg, ddict, par_dir='denoising', run=run+1, desc=desc, dtype=dtype, nii=True)
 
     else:  # between-run, GLMdenoise style denoising
         # Also check 0 components!

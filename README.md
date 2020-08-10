@@ -11,7 +11,7 @@ Also, note that it has a very extensive API (many options), but each option has 
 * Lots of RAM (especially when using multiple CPUs)
 
 ### Installing
-To install, clone the repository and run `pip install -e .` (the `-e` flag will install a development version, which you can omit).
+To install, clone the repository and run `pip install -e .` (the `-e` flag will install a development version, which you can omit). Note: you need to install the master version of `nilearn` from Github yourself (clone + pip install .), because `pybest` uses the latest (not-yet-released) version of `nilearn`.
 
 ### Using pybest
 The API is relatively well documented. Check it out by running:

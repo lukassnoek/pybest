@@ -259,7 +259,9 @@ def preprocess_events(ddict, cfg, logger):
     data_ = []
     for i, event in enumerate(ddict['events']):
         data = pd.read_csv(event, sep='\t')
-        
+        if cfg['trial_filter'] is not None:
+            data = data.copy().query(cfg['trial_filter'])
+
         # Check if necessary columns are there
         for col in ['onset', 'duration', 'trial_type']:  
             if col not in data.columns:
