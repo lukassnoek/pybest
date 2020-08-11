@@ -36,7 +36,8 @@ opts = dict(
     entry_points={
         'console_scripts': [
             'pybest=pybest.cli:main',
-            'pybest_view_surf=pybest.utils:view_surf'
+            'pybest_view_surf=pybest.utils:view_surf',
+            'pybest_npy2mgz=pybest.utils:pybest_npy2mgz'
             ]
         }
 )

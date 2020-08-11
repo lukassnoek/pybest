@@ -209,14 +209,14 @@ def find_data(cfg, logger):
     else:
         ffunc_dir = op.join(fprep_dir, f'sub-{sub}', f'ses-{ses}', 'func')
 
-    funcs = sorted(glob(op.join(ffunc_dir, f'*task-{task}*_space-{space}_{idf}')))
+    funcs = sorted(glob(op.join(ffunc_dir, f'*task-{task}_*space-{space}_{idf}')))
     if not funcs:
         raise ValueError(
             "Could not find fMRI data with the following parameters:\n"
             f"sub-{sub}, ses-{ses}, task-{task}, space-{space}_{idf}"
         )
     
-    confs = sorted(glob(op.join(ffunc_dir, f'*task-{task}*_desc-confounds_regressors.tsv')))
+    confs = sorted(glob(op.join(ffunc_dir, f'*task-{task}_*desc-confounds_regressors.tsv')))
 
     # Find event files, which should be in the BIDS dir
     bids_dir = cfg['bids_dir']

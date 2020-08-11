@@ -382,6 +382,7 @@ def view_surf(file, hemi, space, fs_dir, threshold, idx):
                 "Could not determine space from filename; "
                 "set it explicitly using --space or --fs-dir"
             )
+    
     if fs_dir is not None:  # use data from specified Freesurfer dir
         mesh = op.join(fs_dir, 'surf', f"{hemi.lower()}h.inflated")
         bg = op.join(fs_dir, 'surf', f"{hemi.lower()}h.sulc")
@@ -406,3 +407,16 @@ def view_surf(file, hemi, space, fs_dir, threshold, idx):
         threshold=threshold
     )
     display.open_in_browser()
+
+
+@click.command()
+@click.argument('in_file')
+@click.argument('out_file')
+def pybest_npy2mgz(in_file, out_file):
+    dat = np.load(in_file)
+    if dat.ndim == 2:
+        dat = dat.reshape((dat.shape[1], 1, 1, dat.shape[0]))
+    
+    img = nib.freesurfer.mghformat.MGHImage(dat.astype('float32'), affine=np.eye(4))
+    img.to_filename(out_file)
+
