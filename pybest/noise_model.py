@@ -315,6 +315,6 @@ def load_denoising_data(ddict, cfg):
     else:
         ddict['preproc_events'] = None
 
-    ddict['run_idx'] = np.load(op.join(preproc_dir, 'run_idx.npy'))
+    ddict['run_idx'] = np.load(op.join(preproc_dir, f"task-{cfg['c_task']}_run_idx.npy"))
     
     return ddict

@@ -48,7 +48,7 @@ from .signal_model import run_signal_processing
 @click.option('--cv-repeats', default=1, type=click.INT, show_default=True, help='Number of cross-validation repeats in noise processing (only relevant when noiseproc-type is "within")')
 @click.option('--cv-splits', default=5, type=click.INT, show_default=True, help='Number of cross-validation splits in noise processing (folds; only relevant when noiseproc-type is "within"')
 @click.option('--regularize-n-comps', is_flag=True, help='Flag: whether to "regularize" number of noise components by picking the same number across runs')
-@click.option('--argmax-percent', default=5., type=click.FLOAT, help='How much (in percept) the argmax r2 may deviate from the the max')
+@click.option('--argmax-percent', default=5., type=click.FLOAT, help='How much (in percent) the argmax r2 may deviate from the the max')
 # 5. Signalproc options
 @click.option('--skip-signalproc', is_flag=True, help='Flag: whether to skip signal processing (only noiseproc)')
 @click.option('--signalproc-type', default='single-trial', type=click.Choice(['single-trial', 'glmdenoise']), help='Type of signal processing (single-trial: LSA/LSS style model, glmdenoise: cross-validated model)')
@@ -65,12 +65,13 @@ from .signal_model import run_signal_processing
 @click.option('--smoothing-fwhm', default=None, type=click.FLOAT, help='Whether to smooth statistic maps (default: no smoothing)')
 @click.option('--n-cpus', default=1, show_default=True, help='Number of CPUs to use (mainly to process runs in parallel)')
 @click.option('--save-all', is_flag=True, help='Save more outputs than strictly necessary (but nice to inspect your data in detail)')
-@click.option('--verbose', default='INFO', type=click.Choice(['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']), show_default=True, help='Verbosity level')#
+@click.option('--save-mgz', is_flag=True, help='Save surface files as mgz instead of npy files')
+@click.option('--verbose', default='INFO', type=click.Choice(['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']), show_default=True, help='Verbosity level')
 def main(fprep_dir, bids_dir, out_dir, start_from, ricor_dir, subject, session, pool_sessions, task, space, hemi,
          gm_thresh, slice_time_ref, high_pass_type, high_pass, trial_filter, skip_noiseproc, noise_source, decomp, n_comps,
          noiseproc_type, cv_repeats, cv_splits, regularize_n_comps, argmax_percent, skip_signalproc, signalproc_type, contrast,
          single_trial_id, hrf_model, single_trial_noise_model, regularize_hrf_model, single_trial_model, pattern_units, uncorrelation,
-         smoothing_fwhm, n_cpus, save_all, verbose):
+         smoothing_fwhm, n_cpus, save_all, save_mgz, verbose):
     """ Main API of pybest. """
     
     ##### set + check parameters #####

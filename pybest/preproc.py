@@ -57,7 +57,7 @@ def preprocess_funcs(ddict, cfg, logger):
 
     # Save run_idx
     out_dir = op.join(cfg['save_dir'], 'preproc')
-    np.save(op.join(out_dir, 'run_idx.npy'), run_idx)
+    np.save(op.join(out_dir, f"task-{cfg['c_task']}_run_idx.npy"), run_idx)
 
     # Extract TRs
     ddict['trs'] = [o[2] for o in out]
@@ -325,7 +325,7 @@ def preprocess_events(ddict, cfg, logger):
     conditions = sorted(data['trial_type'].unique().tolist())
     for run in data['run'].unique():
         these_con = sorted(data.query("run == @run")['trial_type'].unique().tolist())
-        if not these_con == conditions:
+        if not these_con == conditions and cfg['noiseproc_type'] == 'between':
             logger.warn(
                 f"Conditions are not the same across runs! "
                 "This is a problem from GLMdenoise style analyses"
@@ -379,6 +379,6 @@ def load_preproc_data(ddict, cfg):
         ddict['preproc_events'] = None
 
     # Load run index (which time point belongs to which run?)
-    ddict['run_idx'] = np.load(op.join(in_dir, 'run_idx.npy'))
+    ddict['run_idx'] = np.load(op.join(in_dir, f"task-{cfg['c_task']}_run_idx.npy"))
     
     return ddict

@@ -1,5 +1,6 @@
 import os
 import click
+import subprocess
 import os.path as op
 import numpy as np
 import nibabel as nib
@@ -96,20 +97,37 @@ def save_data(data, cfg, ddict, par_dir, desc, dtype, run=None, ext=None,
 
     save_dir = op.join(cfg['save_dir'], par_dir)
     if not op.isdir(save_dir):
-        os.makedirs(save_dir)
+        os.makedirs(save_dir, exist_ok=True)
 
-    if run is None:
-        f_out = op.join(save_dir, cfg['f_base'] + f'_desc-{desc}_{dtype}')
+    sub, ses, task, space, hemi = cfg['c_sub'], cfg['c_ses'], cfg['c_task'], cfg['space'], cfg['hemi']
+    space_idf = f'{space}_hemi-{hemi}' if 'fs' in space else space
+
+    if ses is None:  # no separate session output dir
+        f_base = f"sub-{sub}_task-{task}"
     else:
-        f_out = op.join(save_dir, cfg['f_base'] +
-                        f'_run-{run}_desc-{desc}_{dtype}')
+        f_base = f"sub-{sub}_ses-{ses}_task-{task}"
+        
+    if run is None:
+        f_out = op.join(save_dir, f_base + f'_space-{space_idf}_desc-{desc}_{dtype}')
+    else:
+        f_out = op.join(save_dir, f_base + f'_run-{run}_space-{space_idf}_desc-{desc}_{dtype}')
 
     if ext == 'tsv':
         data.to_csv(f_out + '.tsv', sep='\t', index=False)
         return None
 
     if 'fs' in cfg['space']:  # surface, always save as npy
-        np.save(f_out + '.npy', data)
+        if cfg['save_mgz']:
+            if data.ndim == 1:
+                data = data.reshape((data.shape[0], 1, 1))
+            elif data.ndim == 2:
+                T, K = data.shape
+                data = data.reshape((K, 1, 1, T))
+            else:
+                raise ValueError("Trying to save data with >2 dimensions as MGZ file ...")
+            nib.MGHImage(data, np.eye(4)).to_filename(f_out + '.mgz')
+        else:
+            np.save(f_out + '.npy', data)
     else:  # volume, depends on `nii` arg
         if nii:  # save as volume
             if not isinstance(data, nib.Nifti1Image):
@@ -420,3 +438,39 @@ def pybest_npy2mgz(in_file, out_file):
     img = nib.freesurfer.mghformat.MGHImage(dat.astype('float32'), affine=np.eye(4))
     img.to_filename(out_file)
 
+
+@click.command()
+@click.option('--in-file', required=True)
+@click.option('--out-dir', required=False)
+@click.option('--target', required=False)
+@click.option('--subjects-dir', required=False)
+@click.option('--smooth-fwhm', type=click.FLOAT)
+def pybest_vol2surf(in_file, out_dir, target, subjects_dir, smooth_fwhm=None):
+    
+    if out_dir is None:
+        out_dir = op.dirname(in_file)
+
+    if subjects_dir is None and target is None:
+        raise ValueError("When `target` is None, set --subjects-dir!")
+
+    if target is None:
+        target = op.basename(in_file).split('_')[0]
+
+    cmd = (
+        f"mri_vol2surf --mov {in_file} --ref T1.mgz --sd {subjects_dir}"
+        f" --cortex --projfrac-avg 0 1 0.2 --interp trilinear --regheader {target}"
+    )
+
+    if target[:3] != 'sub':
+        cmd += f" --trgsubject {target}"
+
+    if smooth_fwhm is not None:
+        cmd += f" --surf-fwhm {smooth_fwhm}"
+
+    orig_space = op.basename(in_file).split('space-')[1].split('_')[0]
+    new_space = 'fsnative' if target[:3] == 'sub' else target
+    for hemi in ['lh', 'rh']:
+        f_out = op.basename(in_file).replace(orig_space, new_space + f'_hemi-{hemi[0].upper()}')
+        f_out = op.join(out_dir, f_out.replace('.nii.gz', '.gii'))
+        to_run = cmd + f' --o {f_out} --hemi {hemi}'
+        subprocess.call(to_run, shell=True, stdout=subprocess.DEVNULL)

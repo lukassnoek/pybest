@@ -276,18 +276,20 @@ def _run_glmdenoise_model(ddict, cfg, logger):
     opt_n_comps = ddict['opt_n_comps']
 
     if cfg['hrf_model'] == 'kay':  # use optimal HRF
-        if cfg['noiseproc_type'] == 'between':
-            opt_hrf_idx = ddict['opt_hrf_idx'].astype(int)
-        else:  # still have to do this!
+        if ddict['opt_hrf_idx'].sum() == 0:
+            logger.warn("No HRF index data found; going to start optimization routine")
             r2_hrf = _optimize_hrf_between(ddict, cfg, logger)
             opt_hrf_idx = r2_hrf.argmax(axis=0)
             save_data(opt_hrf_idx, cfg, ddict, par_dir='best', run=None, desc='opt', dtype='hrf')
             save_data(r2_hrf, cfg, ddict, par_dir='best', run=None, desc='hrf', dtype='r2')
             save_data(r2_hrf.max(axis=0), cfg, ddict, par_dir='best', run=None, desc='max', dtype='r2')   
+        else:
+            opt_hrf_idx = ddict['opt_hrf_idx'].astype(int)
     else:  # use the same HRF (this is ignored)
         opt_hrf_idx = np.zeros(K)
 
     r2 = np.zeros(K)
+    preds = np.zeros_like(Y_all)
 
     # Loop over HRF indices
     for hrf_idx in np.unique(opt_hrf_idx).astype(int):            
@@ -323,6 +325,7 @@ def _run_glmdenoise_model(ddict, cfg, logger):
             # Get regular (parametric) scores
             labels, results = run_glm(Y, X.to_numpy(), noise_model='ols')
             r2[vox_idx] = get_param_from_glm('r_square', labels, results, X, time_series=False)
+            preds[:, vox_idx] = get_param_from_glm('predicted', labels, results, X, time_series=True)
 
             for i, cond in enumerate(conditions):
                 cvec = np.zeros(X.shape[1])
@@ -341,6 +344,10 @@ def _run_glmdenoise_model(ddict, cfg, logger):
 
     if cfg['contrast'] is not None:
         save_data(ccon_param, cfg, ddict, par_dir='best', run=None, desc='custom', dtype=cfg['pattern_units'], nii=True)
+
+    for run in np.unique(ddict['run_idx']):
+        save_data(preds[run == ddict['run_idx']], cfg, ddict, par_dir='best',
+                  run=run+1, desc='model', dtype='predicted', nii=True)
 
 
 def _optimize_hrf_between(ddict, cfg, logger):
@@ -363,7 +370,7 @@ def _optimize_hrf_between(ddict, cfg, logger):
     # Loop over HRF indices
     for hrf_idx in tqdm_ctm(range(20), tdesc('Optimizing HRF shape: ')):           
         # Loop over n-components
-        for n_comp in np.unique(opt_n_comps):
+        for n_comp in np.unique(opt_n_comps).astype(int):
 
             # Determine voxel index (intersection nonzero and the voxels that 
             # were denoised with the current n_comp)
@@ -383,7 +390,7 @@ def _optimize_hrf_between(ddict, cfg, logger):
                 # Orthogonalize noise components w.r.t. design matrix
                 if n_comp != 0:
                     X.loc[:, :], _ = custom_clean(X, this_Y, confs[:, :n_comp], tr, ddict, cfg, clean_Y=False)
-    
+
                 X = X - X.mean(axis=0)
                 Xs.append(X)
 
