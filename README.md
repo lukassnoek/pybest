@@ -1,9 +1,8 @@
 # pybest
-PYthon package for Beta ESTimation
+PYthon package for Beta ESTimation (of single-trial data). Also does some nifty denoising.
 
 ## Warning
-This package is still in development and its API might change.
-Also, note that it has a very extensive API (many options), but each option has a sensible default.
+This package is still in development and its API might change. Also, note that it has a very extensive API (many options), but each option has a sensible default.
 
 ## What you need to run pybest ...
 * Fmriprep-preprocessed data (or data with *desc-preproc_bold, *desc-brain_mask, and *desc-confounds_regressors.tsv files)
