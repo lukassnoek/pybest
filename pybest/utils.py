@@ -32,6 +32,85 @@ def load_gifti(f, return_tr=True):
         return data
 
 
+def load_and_split_cifti(cifti, mode='all'):
+    """
+    Takes a cifti file and splits it into 3 numpy arrays (left hemisphere,
+    right hemispehre and subcortex).
+
+    Produces equivalent results to reading in files produced by the below
+    connectome workbench command, but does not save the files. Useful for not
+    creating unwanted files.
+
+    wb_command -cifti-separate {cii} COLUMN -volume-all {cii_n}_subvol.nii.gz -metric CORTEX_LEFT {cii_n}_L.gii -metric CORTEX_RIGHT {cii_n}_R.gii\n
+
+    For instance, it will produce the same results (as assessed by np.array_equal) to the following:
+
+    l=nib.load('{cii_n}_L.gii')
+    l=np.array(l.agg_data()).T (transposed to make time last dimension)
+
+    r=nib.load('{cii_n}_R.gii')
+    r=np.array(r.agg_data()).T
+
+    s=nib.load('{cii_n}_subvol.nii.gz')
+    s=np.asanyarray(s.dataobj)
+
+
+    Parameters
+    ----------
+    cifti : Path to the cifti file to split.
+    mode: which to return "all" = surface and subcortex, "subcortex" = only subcortex, "surface" = only surface
+    Returns
+    -------
+    l = left hemisphere (np.array, vertices * time).
+    r = right hemisphere (np.array, vertices * time).
+    s = subcortex (np.array, last dimension = time)
+    """
+
+    # Read the indexes
+    idxs = h5py.File('/tank/shared/timeless/atlases/cifti_indices.hdf5', "r")
+    lidxs = np.array(idxs['Left_indices'])
+    ridxs = np.array(idxs['Right_indices'])
+    sidxs = np.array(idxs['Subcortex_indices'])
+    idxs.close()
+
+    # Load the data
+    datvol = nb.load(cifti)
+    dat = np.asanyarray(datvol.dataobj)
+
+    if mode == 'all' or mode == 'surface':
+        # Populate left and right hemisphere.
+        l, r, = dat[:, lidxs], dat[:, ridxs]
+
+        # Replace the minus 1
+        l[:, lidxs == -1] = np.zeros_like(l[:, lidxs == -1])
+        r[:, ridxs == -1] = np.zeros_like(r[:, ridxs == -1])
+
+        # Last dimension time.
+        l, r = l.T, r.T
+
+    if mode == 'surface':
+        return l, r
+
+    if mode == 'all' or mode == 'subcortex':
+        # Get indexes for valid elements.
+        nonpad = sidxs.flatten()[sidxs.flatten() != -1]
+
+        # Make empty matrix for subcortex
+        s = np.zeros((dat.shape[0], *sidxs.shape))
+
+        # Populate with the appropriate data
+        s[:, sidxs != -1] = dat[:, nonpad]
+
+        # Last dimension time.
+        s = np.moveaxis(s, 0, -1)
+
+    if mode == 'subcortex':
+        return s
+
+    else:
+        return l, r, s
+
+
 def argmax_regularized(data, axis=0, percent=5):
     """ Argmax but "regularized" by not taking the actual argmax,
     but one relative to `percent` deviation from the max, like
