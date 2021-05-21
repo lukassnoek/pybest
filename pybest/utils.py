@@ -70,8 +70,8 @@ def load_and_split_cifti(cifti, indices_file, left_id, right_id, subc_id, mode='
 
     # Read the indexes
     try:
-        if indices.lower().endswith(".hdf5"):
-            idxs = h5py.File(indices, "r")
+        if indices_file.lower().endswith(".hdf5"):
+            idxs = h5py.File(indices_file, "r")
             lidxs = np.array(idxs[left_id])
             ridxs = np.array(idxs[right_id])
             if mode == 'all' or mode == 'subcortex':
@@ -79,8 +79,8 @@ def load_and_split_cifti(cifti, indices_file, left_id, right_id, subc_id, mode='
 
             idxs.close()
 
-        elif indices.lower().endswith((".npy", ".npz")):
-            idxs = np.load(indices)
+        elif indices_file.lower().endswith((".npy", ".npz")):
+            idxs = np.load(indices_file)
             lidxs = idxs[left_id]
             ridxs = idxs[right_id]
             if mode == 'all' or mode == 'subcortex':
