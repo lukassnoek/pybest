@@ -88,7 +88,7 @@ def find_exp_parameters(cfg, logger):
 
     hemi, space = cfg['hemi'], cfg['space']
     if iscifti == 'y':
-        space_idf = f'LR*.nii' if 'fs' in space else 'desc-preproc_bold.nii.gz'
+        space_idf = f'LR*.dtseries.nii' if 'fs' in space else 'desc-preproc_bold.nii.gz'
     else:
         space_idf = f'hemi-{hemi}*.func.gii' if 'fs' in space else 'desc-preproc_bold.nii.gz'
 
@@ -238,7 +238,10 @@ def find_data(cfg, logger):
         ses = '*'  # wilcard for globbing across sessions
 
     # idf = identifier for files
-    idf = f'hemi-{hemi}*.func.gii' if 'fs' in space else 'desc-preproc_bold.nii.gz'
+    if iscifti == 'y':
+        idf = f'LR*.dtseries.nii' if 'fs' in space else 'desc-preproc_bold.nii.gz'
+    else:
+        idf = f'hemi-{hemi}*.func.gii' if 'fs' in space else 'desc-preproc_bold.nii.gz'
 
     # Gather funcs, confs, tasks
     fprep_dir = cfg['fprep_dir']
@@ -246,8 +249,10 @@ def find_data(cfg, logger):
         ffunc_dir = op.join(fprep_dir, f'sub-{sub}', 'func')
     else:
         ffunc_dir = op.join(fprep_dir, f'sub-{sub}', f'ses-{ses}', 'func')
-
-    funcs = sorted(glob(op.join(ffunc_dir, f'*task-{task}_*space-{space}_{idf}')))
+    if iscifti == 'y':
+        funcs = sorted(glob(op.join(ffunc_dir, f'*task-{task}_*space-{space}_?{idf}')))
+    else:
+        funcs = sorted(glob(op.join(ffunc_dir, f'*task-{task}_*space-{space}_{idf}')))
     if not funcs:
         raise ValueError(
             "Could not find fMRI data with the following parameters:\n"
