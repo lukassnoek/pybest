@@ -33,7 +33,7 @@ def load_gifti(f, return_tr=True):
         return data
 
 
-def load_and_split_cifti(cifti, indices_file, left_id, right_id, subc_id, mode='all'):
+def load_and_split_cifti(cifti, indices_file, left_id=None, right_id=None, subc_id=None, mode='all'):
     """
     Takes a cifti file and splits it into 3 numpy arrays (left hemisphere,
     right hemispehre and subcortex).
@@ -73,8 +73,9 @@ def load_and_split_cifti(cifti, indices_file, left_id, right_id, subc_id, mode='
     try:
         if indices_file.lower().endswith(".hdf5"):
             idxs = h5py.File(indices_file, "r")
-            lidxs = np.array(idxs[left_id])
-            ridxs = np.array(idxs[right_id])
+            if mode == 'all' or mode == 'surface':
+                lidxs = np.array(idxs[left_id])
+                ridxs = np.array(idxs[right_id])
             if mode == 'all' or mode == 'subcortex':
                 sidxs = np.array(idxs[subc_id])
 
@@ -82,8 +83,9 @@ def load_and_split_cifti(cifti, indices_file, left_id, right_id, subc_id, mode='
 
         elif indices_file.lower().endswith((".npy", ".npz")):
             idxs = np.load(indices_file)
-            lidxs = idxs[left_id]
-            ridxs = idxs[right_id]
+            if mode == 'all' or mode == 'surface':
+                lidxs = idxs[left_id]
+                ridxs = idxs[right_id]
             if mode == 'all' or mode == 'subcortex':
                 sidxs = idxs[subc_id]
 
