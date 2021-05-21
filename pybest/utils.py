@@ -32,7 +32,7 @@ def load_gifti(f, return_tr=True):
         return data
 
 
-def load_and_split_cifti(cifti, mode='all'):
+def load_and_split_cifti(cifti, indices_file, left_id, right_id, subc_id, mode='all'):
     """
     Takes a cifti file and splits it into 3 numpy arrays (left hemisphere,
     right hemispehre and subcortex).
@@ -58,6 +58,8 @@ def load_and_split_cifti(cifti, mode='all'):
     Parameters
     ----------
     cifti : Path to the cifti file to split.
+    indices_file : Path to .hdf5, .npz or .npy file with indices of cortical surface and subcortex.
+    left_id, right_id, subc_id : either strings (keys) for .hfd5 and .npy or int ('sub'-array in array) for .npy file.
     mode: which to return "all" = surface and subcortex, "subcortex" = only subcortex, "surface" = only surface
     Returns
     -------
@@ -67,11 +69,25 @@ def load_and_split_cifti(cifti, mode='all'):
     """
 
     # Read the indexes
-    idxs = h5py.File('/tank/shared/timeless/atlases/cifti_indices.hdf5', "r")
-    lidxs = np.array(idxs['Left_indices'])
-    ridxs = np.array(idxs['Right_indices'])
-    sidxs = np.array(idxs['Subcortex_indices'])
-    idxs.close()
+    try:
+        if indices.lower().endswith(".hdf5"):
+            idxs = h5py.File(indices, "r")
+            lidxs = np.array(idxs[left_id])
+            ridxs = np.array(idxs[right_id])
+            if mode == 'all' or mode == 'subcortex':
+                sidxs = np.array(idxs[subc_id])
+
+            idxs.close()
+
+        elif indices.lower().endswith((".npy", ".npz")):
+            idxs = np.load(indices)
+            lidxs = idxs[left_id]
+            ridxs = idxs[right_id]
+            if mode == 'all' or mode == 'subcortex':
+                sidxs = idxs[subc_id]
+
+    except Exception as exc:
+        raise ValueError("Extension must be .hdf5, .npy or .npz") from exc
 
     # Load the data
     datvol = nb.load(cifti)
