@@ -99,7 +99,10 @@ def main(fprep_dir, bids_dir, out_dir, start_from, ricor_dir, subject, session, 
                 logger.info(f"Starting process for sub-{sub},{s} task-{task}")
                 
                 # Some bookkeeping
-                space_idf = f'{space}_hemi-{hemi}' if 'fs' in space else space
+                if iscifti == 'y':
+                    space_idf = f'fsLR' if 'fs' in space else space
+                else:
+                    space_idf = f'{space}_hemi-{hemi}' if 'fs' in space else space
 
                 # f_base: base for output files
                 if ses is None:  # no separate session output dir
