@@ -5,6 +5,7 @@ import os.path as op
 import numpy as np
 import nibabel as nib
 import pandas as pd
+import h5py
 from tqdm import tqdm
 from glob import glob
 from scipy.interpolate import interp1d
@@ -90,7 +91,7 @@ def load_and_split_cifti(cifti, indices_file, left_id, right_id, subc_id, mode='
         raise ValueError("Extension must be .hdf5, .npy or .npz") from exc
 
     # Load the data
-    datvol = nb.load(cifti)
+    datvol = nib.load(cifti)
     dat = np.asanyarray(datvol.dataobj)
 
     if mode == 'all' or mode == 'surface':
