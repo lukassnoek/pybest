@@ -87,7 +87,10 @@ def find_exp_parameters(cfg, logger):
     """ Extracts experimental parameters. """
 
     hemi, space = cfg['hemi'], cfg['space']
-    space_idf = f'hemi-{hemi}*.func.gii' if 'fs' in space else 'desc-preproc_bold.nii.gz'
+    if iscifti == 'y':
+        space_idf = f'LR*.nii' if 'fs' in space else 'desc-preproc_bold.nii.gz'
+    else:
+        space_idf = f'hemi-{hemi}*.func.gii' if 'fs' in space else 'desc-preproc_bold.nii.gz'
 
     # Use all possible participants if not provided
     if cfg['subject'] is None:
@@ -126,20 +129,38 @@ def find_exp_parameters(cfg, logger):
             these_task = []
             for this_ses in these_ses:
                 if this_ses is None:  # only single session!
-                    tmp = glob(op.join(
-                        cfg['fprep_dir'],
-                        f'sub-{this_sub}',
-                        'func',
-                        f"*space-{cfg['space']}*_{space_idf}"
-                    ))
+                    if iscifti == 'y':
+                        tmp = glob(op.join(
+                            cfg['fprep_dir'],
+                            f'sub-{this_sub}',
+                            'func',
+                            f"*space-{cfg['space']}*{space_idf}"
+                        ))
+                    else:
+                        tmp = glob(op.join(
+                            cfg['fprep_dir'],
+                            f'sub-{this_sub}',
+                            'func',
+                            f"*space-{cfg['space']}*_{space_idf}"
+                        ))
                 else:
-                    tmp = glob(op.join(
-                        cfg['fprep_dir'],
-                        f'sub-{this_sub}',
-                        f'ses-{this_ses}',
-                        'func',
-                        f"*space-{cfg['space']}*_{space_idf}"
-                    ))
+                    if iscifti == 'y':
+                        tmp = glob(op.join(
+                            cfg['fprep_dir'],
+                            f'sub-{this_sub}',
+                            f'ses-{this_ses}',
+                            'func',
+                            f"*space-{cfg['space']}*{space_idf}"
+                        ))
+
+                    else:
+                        tmp = glob(op.join(
+                            cfg['fprep_dir'],
+                            f'sub-{this_sub}',
+                            f'ses-{this_ses}',
+                            'func',
+                            f"*space-{cfg['space']}*_{space_idf}"
+                        ))
 
                 these_ses_task = list(set(
                     [op.basename(f).split('task-')[1].split('_')[0]
@@ -160,20 +181,37 @@ def find_exp_parameters(cfg, logger):
             these_task = []
             for this_ses in these_ses:
                 if this_ses is None:
-                    tmp = glob(op.join(
-                        cfg['fprep_dir'],
-                        f'sub-{this_sub}',
-                        'func',
-                        f"*task-{cfg['task']}_*_space-{cfg['space']}*_{space_idf}"
-                    ))
+                    if iscifti == 'y':
+                        tmp = glob(op.join(
+                            cfg['fprep_dir'],
+                            f'sub-{this_sub}',
+                            'func',
+                            f"*task-{cfg['task']}_*space-{cfg['space']}*{space_idf}"
+                        ))
+                    else:
+                        tmp = glob(op.join(
+                            cfg['fprep_dir'],
+                            f'sub-{this_sub}',
+                            'func',
+                            f"*task-{cfg['task']}_*_space-{cfg['space']}*_{space_idf}"
+                        ))
                 else:
-                    tmp = glob(op.join(
-                        cfg['fprep_dir'],
-                        f'sub-{this_sub}',
-                        f'ses-{this_ses}',
-                        'func',
-                        f"*task-{cfg['task']}_*_space-{cfg['space']}*_{space_idf}"
-                    ))
+                    if iscifti == 'y':
+                        tmp = glob(op.join(
+                            cfg['fprep_dir'],
+                            f'sub-{this_sub}',
+                            f'ses-{this_ses}',
+                            'func',
+                            f"*task-{cfg['task']}_*space-{cfg['space']}*{space_idf}"
+                        ))
+                    else:
+                        tmp = glob(op.join(
+                            cfg['fprep_dir'],
+                            f'sub-{this_sub}',
+                            f'ses-{this_ses}',
+                            'func',
+                            f"*task-{cfg['task']}_*_space-{cfg['space']}*_{space_idf}"
+                        ))
                 if tmp:
                     these_task.append([cfg['task']])
                 else:
