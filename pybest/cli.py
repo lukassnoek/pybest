@@ -72,7 +72,7 @@ from .signal_model import run_signal_processing
 @click.option('--save-all', is_flag=True, help='Save more outputs than strictly necessary (but nice to inspect your data in detail)')
 @click.option('--save-mgz', is_flag=True, help='Save surface files as mgz instead of npy files')
 @click.option('--verbose', default='INFO', type=click.Choice(['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']), show_default=True, help='Verbosity level')
-def main(fprep_dir, bids_dir, atlas_file, out_dir, start_from, ricor_dir, subject, session, pool_sessions, task, space, hemi,
+def main(fprep_dir, bids_dir, atlas_file, left_id, right_id, subc_id, out_dir, start_from, ricor_dir, subject, session, pool_sessions, task, space, hemi,
          iscifti, gm_thresh, slice_time_ref, high_pass_type, high_pass, trial_filter, skip_noiseproc, noise_source, decomp, n_comps,
          noiseproc_type, cv_repeats, cv_splits, regularize_n_comps, argmax_percent, skip_signalproc, signalproc_type, contrast,
          single_trial_id, hrf_model, single_trial_noise_model, regularize_hrf_model, single_trial_model, pattern_units, uncorrelation,
