@@ -76,8 +76,12 @@ def _run_func_parallel(ddict, cfg, run, func, logger):
     """ Parallelizes loading/hp-filtering of fMRI run. """
     # Load data
     if 'fs' in cfg['space']:  # assume gifti
-        data, tr = load_gifti(func, return_tr=True)
-        tr /= 1000  # defined in msec
+        if cfg['iscifti'] == 'y':
+            data = load_and_split_cifti(func, cfg['atlas_file'], cfg['left_id'], cfg['right_id'], cfg['subc_id'], cfg['mode'])
+            tr = cfg['TR']
+        else:
+            data, tr = load_gifti(func, return_tr=True)
+            tr /= 1000  # defined in msec
     else:
         # Load/mask data and extract stuff
         tr = nib.load(func).header['pixdim'][4]
