@@ -33,7 +33,7 @@ def load_gifti(f, return_tr=True):
         return data
 
 
-def load_and_split_cifti(cifti, indices_file, left_id=None, right_id=None, subc_id=None, mode='all'):
+def load_and_split_cifti(cifti, indices_file, left_id=None, right_id=None, subc_id=None, mode='all', return_tr=True):
     """
     Takes a cifti file and splits it into 3 numpy arrays (left hemisphere,
     right hemispehre and subcortex).
@@ -94,6 +94,7 @@ def load_and_split_cifti(cifti, indices_file, left_id=None, right_id=None, subc_
 
     # Load the data
     datvol = nib.load(cifti)
+    tr = datvol.header.get_axis(0)[1]
     dat = np.asanyarray(datvol.dataobj)
 
     if mode == 'all' or mode == 'surface':
@@ -107,7 +108,9 @@ def load_and_split_cifti(cifti, indices_file, left_id=None, right_id=None, subc_
         # Last dimension time.
         l, r = l.T, r.T
 
-    if mode == 'surface':
+    if mode == 'surface' and return_tr==True:
+        return l, r, tr
+    elif mode == 'surface' and return_tr==False:
         return l, r
 
     if mode == 'all' or mode == 'subcortex':
@@ -123,8 +126,14 @@ def load_and_split_cifti(cifti, indices_file, left_id=None, right_id=None, subc_
         # Last dimension time.
         s = np.moveaxis(s, 0, -1)
 
-    if mode == 'subcortex':
+    if mode == 'subcortex' and return_tr==True:
+        return s, tr
+
+    elif mode == 'subcortex' and return_tr==False:
         return s
+
+    elif mode=='all' and return_tr==True:
+        return l, r, s, tr
 
     else:
         return l, r, s
