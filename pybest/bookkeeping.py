@@ -258,8 +258,11 @@ def find_data(cfg, logger):
             "Could not find fMRI data with the following parameters:\n"
             f"sub-{sub}, ses-{ses}, task-{task}, space-{space}_{idf}"
         )
-    
-    confs = sorted(glob(op.join(ffunc_dir, f'*task-{task}_*desc-confounds_regressors.tsv')))
+
+    if cfg['iscifti'] == 'y':
+        confs = sorted(glob(op.join(ffunc_dir, f'*task-{task}_*desc - confounds_timeseries.tsv')))
+    else:
+        confs = sorted(glob(op.join(ffunc_dir, f'*task-{task}_*desc-confounds_regressors.tsv')))
 
     # Find event files, which should be in the BIDS dir
     bids_dir = cfg['bids_dir']
