@@ -370,7 +370,11 @@ def get_run_data(ddict, run, func_type='preproc'):
     """ Get the data for a specific run. """
 
     t_idx = ddict['run_idx'] == run  # timepoint index
+    print(t_idx)
+    print(ddict[f'{func_type}_func'].shape)
     func = ddict[f'{func_type}_func'][t_idx, :].copy()
+    print(func.shape)
+    print(ddict['preproc_conf'].shape)
     conf = ddict['preproc_conf'].copy().loc[t_idx, :].to_numpy()
 
     if ddict['preproc_events'] is not None:
