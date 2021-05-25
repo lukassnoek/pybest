@@ -23,6 +23,10 @@ from .signal_model import run_signal_processing
 # 1. Positional args
 @click.argument('fprep_dir')  # Path to Fmriprep output directory
 @click.argument('bids_dir', default=None, required=False)  # Optional BIDS-directory (for event-files)
+@click.argument('atlas_file', default=None, required=False) # If working with cifti, give path to atlas (.npy, .npz or .hdf5)
+@click.argument('left_id', default=None, required=False) # If working with cifti, give key or index of left hemi in atlas file
+@click.argument('right_id', default=None, required=False) # If working with cifti, give key or index of right hemi in atlas file
+@click.argument('subc_id', default=None, required=False) # If working with cifti, give key or index of subcortex in atlas file
 # 2. Which data should we select?
 @click.option('--out-dir', default=None, help='Output directory (default: same level as Fmriprep directory)')
 @click.option('--start-from', type=click.Choice(['preproc', 'noiseproc', 'signalproc']), default='preproc', help='Stage to start analysis from')
@@ -68,8 +72,8 @@ from .signal_model import run_signal_processing
 @click.option('--save-all', is_flag=True, help='Save more outputs than strictly necessary (but nice to inspect your data in detail)')
 @click.option('--save-mgz', is_flag=True, help='Save surface files as mgz instead of npy files')
 @click.option('--verbose', default='INFO', type=click.Choice(['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']), show_default=True, help='Verbosity level')
-def main(fprep_dir, bids_dir, out_dir, start_from, ricor_dir, subject, session, pool_sessions, task, space, hemi,
-         gm_thresh, slice_time_ref, high_pass_type, high_pass, trial_filter, skip_noiseproc, noise_source, decomp, n_comps,
+def main(fprep_dir, bids_dir, atlas_file, out_dir, start_from, ricor_dir, subject, session, pool_sessions, task, space, hemi,
+         iscifti, gm_thresh, slice_time_ref, high_pass_type, high_pass, trial_filter, skip_noiseproc, noise_source, decomp, n_comps,
          noiseproc_type, cv_repeats, cv_splits, regularize_n_comps, argmax_percent, skip_signalproc, signalproc_type, contrast,
          single_trial_id, hrf_model, single_trial_noise_model, regularize_hrf_model, single_trial_model, pattern_units, uncorrelation,
          smoothing_fwhm, n_cpus, save_all, save_mgz, verbose):
