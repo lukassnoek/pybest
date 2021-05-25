@@ -109,9 +109,11 @@ def load_and_split_cifti(cifti, indices_file, left_id=None, right_id=None, subc_
         l, r = l.T, r.T
 
     if mode == 'surface' and return_tr==True:
-        return l, r, tr
+        data = np.vstack([l.T, r.T])
+        return data.T, tr
     elif mode == 'surface' and return_tr==False:
-        return l, r
+        data = np.vstack([l.T, r.T])
+        return data.T
 
     if mode == 'all' or mode == 'subcortex':
         # Get indexes for valid elements.
@@ -133,10 +135,13 @@ def load_and_split_cifti(cifti, indices_file, left_id=None, right_id=None, subc_
         return s
 
     elif mode=='all' and return_tr==True:
-        return l, r, s, tr
+        data = np.vstack([l.T, r.T])
+        return data.T, s, tr
+
 
     else:
-        return l, r, s
+        data = np.vstack([l.T, r.T])
+        return data.T, s
 
 
 def argmax_regularized(data, axis=0, percent=5):
