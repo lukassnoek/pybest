@@ -369,7 +369,11 @@ def load_preproc_data(ddict, cfg):
     
     # Load in TRs (inefficient; maybe save/load as yaml?)
     if 'fs' in cfg['space']:
-        ddict['trs'] = [load_gifti(f)[1] for f in ddict['funcs']]  # quite inefficient
+        if cfg['iscift'] == 'y':
+            ddict['trs'] = [load_and_split_cifti(f, cfg['atlas_file'], cfg['left_id'],
+                                                 cfg['right_id'], cfg['subc_id'])[1] for f in ddict['funcs']]
+        else:
+            ddict['trs'] = [load_gifti(f)[1] for f in ddict['funcs']]  # quite inefficient
     else:
         ddict['trs'] = [nib.load(f).header['pixdim'][4] for f in ddict['funcs']]
 
