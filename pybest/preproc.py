@@ -77,7 +77,7 @@ def _run_func_parallel(ddict, cfg, run, func, logger):
     # Load data
     if 'fs' in cfg['space']:  # assume gifti
         if cfg['iscifti'] == 'y':
-            data, tr = load_and_split_cifti(func, cfg['atlas_file'], cfg['left_id'], cfg['right_id'], cfg['subc_id'], cfg['mode'])
+            data, tr = load_and_split_cifti(func, cfg['atlas_file'], cfg['left_id'], cfg['right_id'], cfg['subc_id'])
             tr /= 1000 # defined in msec
         else:
             data, tr = load_gifti(func, return_tr=True)
