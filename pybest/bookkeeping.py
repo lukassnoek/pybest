@@ -260,7 +260,7 @@ def find_data(cfg, logger):
         )
 
     if cfg['iscifti'] == 'y':
-        confs = sorted(glob(op.join(ffunc_dir, f'*task-{task}_*desc - confounds_timeseries.tsv')))
+        confs = sorted(glob(op.join(ffunc_dir, f'*task-{task}_*desc-confounds_timeseries.tsv')))
     else:
         confs = sorted(glob(op.join(ffunc_dir, f'*task-{task}_*desc-confounds_regressors.tsv')))
 
