@@ -12,7 +12,7 @@ from sklearn.linear_model import LinearRegression
 
 from .logging import tqdm_ctm, tdesc
 from .models import cross_val_r2
-from .utils import load_gifti, get_frame_times, create_design_matrix, hp_filter, save_data
+from .utils import load_gifti, get_frame_times, create_design_matrix, hp_filter, save_data, load_and_split_cifti
 
 
 def preprocess_funcs(ddict, cfg, logger):

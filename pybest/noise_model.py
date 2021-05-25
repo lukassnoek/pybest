@@ -13,7 +13,7 @@ from sklearn.model_selection import RepeatedKFold, LeaveOneGroupOut
 
 from .logging import tqdm_ctm, tdesc
 from .utils import get_run_data, get_frame_times, create_design_matrix, hp_filter
-from .utils import save_data, load_gifti, custom_clean, argmax_regularized
+from .utils import save_data, load_gifti, custom_clean, argmax_regularized, load_and_split_cifti
 from .models import cross_val_r2
 
 
