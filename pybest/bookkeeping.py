@@ -87,7 +87,7 @@ def find_exp_parameters(cfg, logger):
     """ Extracts experimental parameters. """
 
     hemi, space = cfg['hemi'], cfg['space']
-    if iscifti == 'y':
+    if cfg['iscifti'] == 'y':
         space_idf = f'LR*.dtseries.nii' if 'fs' in space else 'desc-preproc_bold.nii.gz'
     else:
         space_idf = f'hemi-{hemi}*.func.gii' if 'fs' in space else 'desc-preproc_bold.nii.gz'
@@ -129,7 +129,7 @@ def find_exp_parameters(cfg, logger):
             these_task = []
             for this_ses in these_ses:
                 if this_ses is None:  # only single session!
-                    if iscifti == 'y':
+                    if cfg['iscifti'] == 'y':
                         tmp = glob(op.join(
                             cfg['fprep_dir'],
                             f'sub-{this_sub}',
@@ -144,7 +144,7 @@ def find_exp_parameters(cfg, logger):
                             f"*space-{cfg['space']}*_{space_idf}"
                         ))
                 else:
-                    if iscifti == 'y':
+                    if cfg['iscifti'] == 'y':
                         tmp = glob(op.join(
                             cfg['fprep_dir'],
                             f'sub-{this_sub}',
@@ -181,7 +181,7 @@ def find_exp_parameters(cfg, logger):
             these_task = []
             for this_ses in these_ses:
                 if this_ses is None:
-                    if iscifti == 'y':
+                    if cfg['iscifti'] == 'y':
                         tmp = glob(op.join(
                             cfg['fprep_dir'],
                             f'sub-{this_sub}',
@@ -196,7 +196,7 @@ def find_exp_parameters(cfg, logger):
                             f"*task-{cfg['task']}_*_space-{cfg['space']}*_{space_idf}"
                         ))
                 else:
-                    if iscifti == 'y':
+                    if cfg['iscifti'] == 'y':
                         tmp = glob(op.join(
                             cfg['fprep_dir'],
                             f'sub-{this_sub}',
@@ -238,7 +238,7 @@ def find_data(cfg, logger):
         ses = '*'  # wilcard for globbing across sessions
 
     # idf = identifier for files
-    if iscifti == 'y':
+    if cfg['iscifti'] == 'y':
         idf = f'LR*.dtseries.nii' if 'fs' in space else 'desc-preproc_bold.nii.gz'
     else:
         idf = f'hemi-{hemi}*.func.gii' if 'fs' in space else 'desc-preproc_bold.nii.gz'
@@ -249,7 +249,7 @@ def find_data(cfg, logger):
         ffunc_dir = op.join(fprep_dir, f'sub-{sub}', 'func')
     else:
         ffunc_dir = op.join(fprep_dir, f'sub-{sub}', f'ses-{ses}', 'func')
-    if iscifti == 'y':
+    if cfg['iscifti'] == 'y':
         funcs = sorted(glob(op.join(ffunc_dir, f'*task-{task}_*space-{space}_?{idf}')))
     else:
         funcs = sorted(glob(op.join(ffunc_dir, f'*task-{task}_*space-{space}_{idf}')))
