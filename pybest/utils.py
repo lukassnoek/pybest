@@ -33,7 +33,7 @@ def load_gifti(f, return_tr=True):
         return data
 
 
-def load_and_split_cifti(cifti, indices_file, left_id=None, right_id=None, subc_id=None, mode='all', return_tr=True):
+def load_and_split_cifti(cifti, indices_file, left_id=None, right_id=None, subc_id=None, mode='surface', return_tr=True):
     """
     Takes a cifti file and splits it into 3 numpy arrays (left hemisphere,
     right hemispehre and subcortex).
