@@ -109,10 +109,10 @@ def load_and_split_cifti(cifti, indices_file, left_id=None, right_id=None, subc_
         l, r = l.T, r.T
 
     if mode == 'surface' and return_tr==True:
-        data = np.vstack([l.T, r.T])
+        data = np.vstack([l, r])
         return data.T, tr
     elif mode == 'surface' and return_tr==False:
-        data = np.vstack([l.T, r.T])
+        data = np.vstack([l, r])
         return data.T
 
     if mode == 'all' or mode == 'subcortex':
@@ -135,7 +135,7 @@ def load_and_split_cifti(cifti, indices_file, left_id=None, right_id=None, subc_
         return s
 
     elif mode=='all' and return_tr==True:
-        data = np.vstack([l.T, r.T])
+        data = np.vstack([l, r])
         return data.T, s, tr
 
 
