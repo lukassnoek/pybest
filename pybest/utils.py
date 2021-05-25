@@ -371,7 +371,7 @@ def get_run_data(ddict, run, func_type='preproc'):
 
     t_idx = ddict['run_idx'] == run  # timepoint index
     func = ddict[f'{func_type}_func'][t_idx, :].copy()
-    conf = ddict['preproc_conf'].copy().loc[t_idx, :].to_numpy()
+    conf = ddict['preproc_conf'][2:,:].copy().loc[t_idx, :].to_numpy()
 
     if ddict['preproc_events'] is not None:
         events = ddict['preproc_events'].copy().query("run == (@run + 1)")
