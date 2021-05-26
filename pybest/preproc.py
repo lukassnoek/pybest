@@ -118,7 +118,8 @@ def preprocess_confs_fmriprep(ddict, cfg, logger):
         # Load and remove cosine regressors
         data = pd.read_csv(conf, sep='\t')[cfg['skip_tr']:]
         if cfg['confounds_filter'] is not None:
-            col_reg = re.compile('|'.join(cfg['confounds_filter']))
+            confounds = cfg.get('confounds_filter')
+            col_reg = re.compile('|'.join(confounds))
             data = data.filter(regex=col_reg)
 
 
