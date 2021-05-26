@@ -131,13 +131,13 @@ def load_and_split_cifti(cifti, indices_file, cfg, left_id=None, right_id=None, 
     if mode == 'subcortex' and return_tr==True:
         actual, pos, zdat = get_valid_voxels(s[:, :, :, 2:])
         cfg['pos'] = pos
-        cfg['zdat'] = zdat
+        cfg['subc_original'] = s[:, :, :, 2:]
         return actual.T, tr
 
     elif mode == 'subcortex' and return_tr==False:
         actual, pos, zdat = get_valid_voxels(s[:, :, :, 2:])
         cfg['pos'] = pos
-        cfg['zdat'] = zdat
+        cfg['subc_original'] = s[:, :, :, 2:]
         return actual.T
 
     elif mode=='all' and return_tr==True:
@@ -146,7 +146,7 @@ def load_and_split_cifti(cifti, indices_file, cfg, left_id=None, right_id=None, 
         print(zdat.shape)
         data = np.vstack([data, actual])
         cfg['pos'] = pos
-        cfg['zdat'] = zdat
+        cfg['subc_original'] = s[:, :, :, 2:]
         cfg['subc_len'] = actual.shape[0]
         return data.T, tr
 
@@ -156,7 +156,7 @@ def load_and_split_cifti(cifti, indices_file, cfg, left_id=None, right_id=None, 
         actual, pos, zdat = get_valid_voxels(s[:, :, :, 2:])
         data = np.vstack([data, actual])
         cfg['pos'] = pos
-        cfg['zdat'] = zdat
+        cfg['subc_original'] = s[:, :, :, 2:]
         cfg['subc_len'] = actual.shape[0]
         return data.T
 
@@ -268,13 +268,19 @@ def save_data(data, cfg, ddict, par_dir, desc, dtype, run=None, ext=None,
             nib.MGHImage(data, np.eye(4)).to_filename(f_out + '.mgz')
         else:
             if cfg['iscifti'] == 'y' and cfg['mode'] == 'subcortex':
-                np.save(f_out + '_subc.npy', data.T)
+                subc_data = cfg['subc_original']
+                pos = cfg['pos']
+                subc_data[pos] = data.T
+                np.save(f_out + '_subc.npy', subc_data)
             elif cfg['iscifti'] == 'y' and cfg['mode'] == 'all':
                 # split in surface and subcortex, save both
                 surf_len = data.shape[1] - cfg['subc_len']
-                subc_data = data[:,surf_len:].T
                 surface_data = data[:, :surf_len].T
-                np.save(f_out + '_subc.npy', subc_data)
+                subc_data = data[:,surf_len:].T
+                subc_orig = cfg['subc_original']
+                pos = cfg['pos']
+                subc_orig[pos] = subc_data
+                np.save(f_out + '_subc.npy', subc_orig)
                 np.save(f_out + '.npy', surface_data)
             elif cfg['iscifti'] == 'y' and cfg['mode'] == 'surface':
                 np.save(f_out + '.npy', data.T)
