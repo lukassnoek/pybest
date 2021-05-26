@@ -129,19 +129,30 @@ def load_and_split_cifti(cifti, indices_file, left_id=None, right_id=None, subc_
         s = np.moveaxis(s, 0, -1)
 
     if mode == 'subcortex' and return_tr==True:
-        return s, tr
+        actual, pos, zdat = get_valid_voxels(s[:, :, :, 2:])
+        return actual.T, pos, zdat, tr
 
     elif mode == 'subcortex' and return_tr==False:
-        return s
+        actual, pos, zdat = get_valid_voxels(s[:, :, :, 2:])
+        return actual.T, pos, zdat
 
     elif mode=='all' and return_tr==True:
         data = np.vstack([l, r])
-        return data.T[2:,:], s, tr
+        actual, pos, zdat = get_valid_voxels(s[:,:,:,2:])
+        return data.T[2:,:], actual.T, pos, zdat, tr
 
 
     else:
         data = np.vstack([l, r])
         return data.T[2:,:], s
+
+
+def get_valid_voxels(data):
+    stds=np.std(data,axis=-1)
+    positions=np.where(stds!=0)
+    zdat=np.zeros_like(stds)
+    actual=data[stds!=0]
+    return actual,positions,zdat
 
 
 def argmax_regularized(data, axis=0, percent=5):
