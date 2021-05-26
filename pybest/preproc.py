@@ -115,7 +115,7 @@ def preprocess_confs_fmriprep(ddict, cfg, logger):
     for i, conf in enumerate(ddict['confs']):
 
         # Load and remove cosine regressors
-        data = pd.read_csv(conf, sep='\t')
+        data = pd.read_csv(conf, sep='\t')[cfg['skip_tr']:]
         # Remove cosines and confounds related to the global signal
         # Anecdotal evidence that leaving out the global signal gives better results ...
         to_remove = [col for col in data.columns if 'cosine' in col or 'global' in col]
