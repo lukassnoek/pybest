@@ -120,6 +120,7 @@ def preprocess_confs_fmriprep(ddict, cfg, logger):
         if cfg['confounds_filter'] is not None:
             confounds = cfg.get('confounds_filter')
             col_reg = re.compile('|'.join(confounds))
+            print(col_reg)
             data = data.filter(regex=col_reg)
 
 
