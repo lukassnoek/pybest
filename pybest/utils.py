@@ -236,7 +236,10 @@ def save_data(data, cfg, ddict, par_dir, desc, dtype, run=None, ext=None,
         os.makedirs(save_dir, exist_ok=True)
 
     sub, ses, task, space, hemi = cfg['c_sub'], cfg['c_ses'], cfg['c_task'], cfg['space'], cfg['hemi']
-    space_idf = f'{space}_hemi-{hemi}' if 'fs' in space else space
+    if cfg['iscifti'] == 'y':
+        space_idf = f'fsLR' if 'fs' in space else space
+    else:
+        space_idf = f'{space}_hemi-{hemi}' if 'fs' in space else space
 
     if ses is None:  # no separate session output dir
         f_base = f"sub-{sub}_task-{task}"
@@ -263,7 +266,25 @@ def save_data(data, cfg, ddict, par_dir, desc, dtype, run=None, ext=None,
                 raise ValueError("Trying to save data with >2 dimensions as MGZ file ...")
             nib.MGHImage(data, np.eye(4)).to_filename(f_out + '.mgz')
         else:
-            np.save(f_out + '.npy', data)
+            if cfg['iscifti'] == 'y' and cfg['mode'] == 'subcortex':
+                zdat = cfg['zdat']
+                pos = cfg['pos']
+                zdat[pos] = data.T
+                np.save(f_out + '_subc.npy', zdat)
+            elif cfg['iscifti'] == 'y' and cfg['mode'] == 'all':
+                # split in surface and subcortex, save both
+                surf_len = data.shape[1] - cfg['subc_len']
+                subc_data = data[:,surf_len-1:]
+                surface_data = data[:, :surf_len].T
+                zdat = cfg['zdat']
+                pos = cfg['pos']
+                zdat[pos] = subc_data.T
+                np.save(f_out + '_subc.npy', zdat)
+                np.save(f_out + '.npy', surface_data)
+            elif cfg['iscifti'] == 'y' and cfg['mode'] == 'surface':
+                np.save(f_out + '.npy', data.T)
+            else:
+                np.save(f_out + '.npy', data)
     else:  # volume, depends on `nii` arg
         if nii:  # save as volume
             if not isinstance(data, nib.Nifti1Image):
