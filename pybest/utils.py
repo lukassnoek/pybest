@@ -274,7 +274,7 @@ def save_data(data, cfg, ddict, par_dir, desc, dtype, run=None, ext=None,
             elif cfg['iscifti'] == 'y' and cfg['mode'] == 'all':
                 # split in surface and subcortex, save both
                 surf_len = data.shape[1] - cfg['subc_len']
-                subc_data = data[:,surf_len-1:]
+                subc_data = data[:,surf_len:]
                 surface_data = data[:, :surf_len].T
                 zdat = cfg['zdat']
                 pos = cfg['pos']
