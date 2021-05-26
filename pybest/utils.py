@@ -145,7 +145,7 @@ def load_and_split_cifti(cifti, indices_file, left_id=None, right_id=None, subc_
     else:
         data = np.vstack([l, r])
         actual, pos, zdat = get_valid_voxels(s[:, :, :, 2:])
-        return data.T[2:,:], actual, pos, zdat
+        return data.T[2:,:], actual.T, pos, zdat
 
 
 def get_valid_voxels(data):
