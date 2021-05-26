@@ -143,7 +143,6 @@ def load_and_split_cifti(cifti, indices_file, cfg, left_id=None, right_id=None, 
     elif mode=='all' and return_tr==True:
         data = np.vstack([l, r])[:,2:]
         actual, pos, zdat = get_valid_voxels(s[:,:,:,2:])
-        print(zdat.shape)
         data = np.vstack([data, actual])
         cfg['pos'] = pos
         cfg['subc_original'] = s[:, :, :, 2:]
