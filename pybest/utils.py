@@ -268,20 +268,13 @@ def save_data(data, cfg, ddict, par_dir, desc, dtype, run=None, ext=None,
             nib.MGHImage(data, np.eye(4)).to_filename(f_out + '.mgz')
         else:
             if cfg['iscifti'] == 'y' and cfg['mode'] == 'subcortex':
-                zdat = cfg['zdat']
-                pos = cfg['pos']
-                zdat[pos] = data.T
-                np.save(f_out + '_subc.npy', zdat)
+                np.save(f_out + '_subc.npy', data.T)
             elif cfg['iscifti'] == 'y' and cfg['mode'] == 'all':
                 # split in surface and subcortex, save both
                 surf_len = data.shape[1] - cfg['subc_len']
-                subc_data = data[:,surf_len:]
+                subc_data = data[:,surf_len:].T
                 surface_data = data[:, :surf_len].T
-                zdat = cfg['zdat']
-                print(zdat.shape)
-                pos = cfg['pos']
-                zdat[pos] = subc_data.T
-                np.save(f_out + '_subc.npy', zdat)
+                np.save(f_out + '_subc.npy', subc_data)
                 np.save(f_out + '.npy', surface_data)
             elif cfg['iscifti'] == 'y' and cfg['mode'] == 'surface':
                 np.save(f_out + '.npy', data.T)
