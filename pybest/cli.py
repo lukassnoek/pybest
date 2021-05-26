@@ -40,7 +40,7 @@ from .signal_model import run_signal_processing
 @click.option('--iscifti', type=click.Choice(['y', 'n']), default='n', show_default=True, help='Choose "y" if files in cifti format')
 @click.option('--mode', type=click.Choice(['surface', 'subcortex', 'all']), default='surface', show_default=True, help='When using cifti file, choose whether to process surface, subcortex or both')
 @click.option('--skip-tr', default=0, type=click.INT, show_default=True, help='Number of TRs to skip (in case of unwanted peak in data)')
-@click.option('--confounds-filter', type=click.STRING, help='Confounds to select (multiple as list) - partial strings are enough (regex)')
+@click.option('--confounds-filter', default=None, type=click.STRING, help='Confounds to select (multiple as list) - partial strings are enough (regex)')
 # 3. Preproc options
 @click.option('--gm-thresh', default=0., show_default=True, help='Threshold for gray-matter mask (if 0, Fmriprep brain masks are used)')  # maybe use a "mask" option
 @click.option('--slice-time-ref', type=click.FLOAT, default=0.5, show_default=True, help='Slice to adjust event onsets to (depends on slice-time correction)')

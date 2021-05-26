@@ -116,6 +116,11 @@ def preprocess_confs_fmriprep(ddict, cfg, logger):
 
         # Load and remove cosine regressors
         data = pd.read_csv(conf, sep='\t')[cfg['skip_tr']:]
+        if cfg['confounds_filter'] is not None:
+            col_reg = re.compile('|'.join(cfg['confounds_filter']))
+            data = data.filter(regex=col_reg)
+
+
         # Remove cosines and confounds related to the global signal
         # Anecdotal evidence that leaving out the global signal gives better results ...
         to_remove = [col for col in data.columns if 'cosine' in col or 'global' in col]
