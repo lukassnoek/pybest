@@ -119,9 +119,11 @@ def preprocess_confs_fmriprep(ddict, cfg, logger):
         data = pd.read_csv(conf, sep='\t')[cfg['skip_tr']:]
         if cfg['confounds_filter'] is not None:
             confounds = cfg.get('confounds_filter')
-            col_reg = re.compile('|'.join(confounds))
-            print(col_reg)
-            data = data.filter(regex=col_reg)
+            if type(confounds) == str:
+                data = data.filter(regex=confounds)
+            else:
+                col_reg = re.compile('|'.join(confounds))
+                data = data.filter(regex=col_reg)
 
 
         # Remove cosines and confounds related to the global signal
