@@ -141,19 +141,23 @@ def load_and_split_cifti(cifti, indices_file, cfg, left_id=None, right_id=None, 
         return actual.T
 
     elif mode=='all' and return_tr==True:
-        data = np.vstack([l, r])
+        data = np.vstack([l, r])[:,2:]
         actual, pos, zdat = get_valid_voxels(s[:,:,:,2:])
+        data = np.vstack([data, actual])
         cfg['pos'] = pos
         cfg['zdat'] = zdat
-        return data.T[2:,:], actual.T, tr
+        cfg['subc_len'] = actual.shape[0]
+        return data.T, tr
 
 
     else:
-        data = np.vstack([l, r])
+        data = np.vstack([l, r])[:,2:]
         actual, pos, zdat = get_valid_voxels(s[:, :, :, 2:])
+        data = np.vstack([data, actual])
         cfg['pos'] = pos
         cfg['zdat'] = zdat
-        return data.T[2:,:], actual.T
+        cfg['subc_len'] = actual.shape[0]
+        return data.T
 
 
 def get_valid_voxels(data):
