@@ -143,6 +143,7 @@ def load_and_split_cifti(cifti, indices_file, cfg, left_id=None, right_id=None, 
     elif mode=='all' and return_tr==True:
         data = np.vstack([l, r])[:,2:]
         actual, pos, zdat = get_valid_voxels(s[:,:,:,2:])
+        print(zdat.shape)
         data = np.vstack([data, actual])
         cfg['pos'] = pos
         cfg['zdat'] = zdat
@@ -277,6 +278,7 @@ def save_data(data, cfg, ddict, par_dir, desc, dtype, run=None, ext=None,
                 subc_data = data[:,surf_len:]
                 surface_data = data[:, :surf_len].T
                 zdat = cfg['zdat']
+                print(zdat.shape)
                 pos = cfg['pos']
                 zdat[pos] = subc_data.T
                 np.save(f_out + '_subc.npy', zdat)
