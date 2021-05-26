@@ -96,7 +96,7 @@ def load_and_split_cifti(cifti, indices_file, cfg, left_id=None, right_id=None, 
     datvol = nib.load(cifti)
     tr = datvol.header.get_axis(0)[1]
     dat = np.asanyarray(datvol.dataobj)
-
+    start_tr = cfg['skip_tr']
     if mode == 'all' or mode == 'surface':
         # Populate left and right hemisphere.
         l, r, = dat[:, lidxs], dat[:, ridxs]
@@ -110,10 +110,10 @@ def load_and_split_cifti(cifti, indices_file, cfg, left_id=None, right_id=None, 
 
     if mode == 'surface' and return_tr==True:
         data = np.vstack([l, r])
-        return data.T[2:,:], tr
+        return data.T[start_tr:,:], tr
     elif mode == 'surface' and return_tr==False:
         data = np.vstack([l, r])
-        return data.T[2:,:]
+        return data.T[start_tr:,:]
 
     if mode == 'all' or mode == 'subcortex':
         # Get indexes for valid elements.
@@ -129,33 +129,33 @@ def load_and_split_cifti(cifti, indices_file, cfg, left_id=None, right_id=None, 
         s = np.moveaxis(s, 0, -1)
 
     if mode == 'subcortex' and return_tr==True:
-        actual, pos, zdat = get_valid_voxels(s[:, :, :, 2:])
+        actual, pos, zdat = get_valid_voxels(s[:, :, :, start_tr:])
         cfg['pos'] = pos
-        cfg['subc_original'] = s[:, :, :, 2:]
+        cfg['subc_original'] = s[:, :, :, start_tr:]
         return actual.T, tr
 
     elif mode == 'subcortex' and return_tr==False:
-        actual, pos, zdat = get_valid_voxels(s[:, :, :, 2:])
+        actual, pos, zdat = get_valid_voxels(s[:, :, :, start_tr:])
         cfg['pos'] = pos
-        cfg['subc_original'] = s[:, :, :, 2:]
+        cfg['subc_original'] = s[:, :, :, start_tr:]
         return actual.T
 
     elif mode=='all' and return_tr==True:
-        data = np.vstack([l, r])[:,2:]
-        actual, pos, zdat = get_valid_voxels(s[:,:,:,2:])
+        data = np.vstack([l, r])[:,start_tr:]
+        actual, pos, zdat = get_valid_voxels(s[:,:,:,start_tr:])
         data = np.vstack([data, actual])
         cfg['pos'] = pos
-        cfg['subc_original'] = s[:, :, :, 2:]
+        cfg['subc_original'] = s[:, :, :, start_tr:]
         cfg['subc_len'] = actual.shape[0]
         return data.T, tr
 
 
     else:
-        data = np.vstack([l, r])[:,2:]
-        actual, pos, zdat = get_valid_voxels(s[:, :, :, 2:])
+        data = np.vstack([l, r])[:,start_tr:]
+        actual, pos, zdat = get_valid_voxels(s[:, :, :, start_tr:])
         data = np.vstack([data, actual])
         cfg['pos'] = pos
-        cfg['subc_original'] = s[:, :, :, 2:]
+        cfg['subc_original'] = s[:, :, :, start_tr:]
         cfg['subc_len'] = actual.shape[0]
         return data.T
 
