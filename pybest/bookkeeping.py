@@ -250,7 +250,7 @@ def find_data(cfg, logger):
     else:
         ffunc_dir = op.join(fprep_dir, f'sub-{sub}', f'ses-{ses}', 'func')
     if cfg['iscifti'] == 'y':
-        funcs = sorted(glob(op.join(ffunc_dir, f'*task-{task}_*space-{space}*{idf}')))
+        funcs = sorted(glob(op.join(ffunc_dir, f'*task-{task}_*space-{space}{idf}')))
     else:
         funcs = sorted(glob(op.join(ffunc_dir, f'*task-{task}_*space-{space}_{idf}')))
     if not funcs:
