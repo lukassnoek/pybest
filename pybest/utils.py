@@ -237,7 +237,7 @@ def save_data(data, cfg, ddict, par_dir, desc, dtype, run=None, ext=None,
 
     sub, ses, task, space, hemi = cfg['c_sub'], cfg['c_ses'], cfg['c_task'], cfg['space'], cfg['hemi']
     if cfg['iscifti'] == 'y':
-        space_idf = f'fsLR' if 'fs' in space else space
+        space_idf = space
     else:
         space_idf = f'{space}_hemi-{hemi}' if 'fs' in space else space
 

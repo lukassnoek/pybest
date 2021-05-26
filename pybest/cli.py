@@ -106,7 +106,7 @@ def main(fprep_dir, bids_dir, atlas_file, left_id, right_id, subc_id, out_dir, s
                 
                 # Some bookkeeping
                 if iscifti == 'y':
-                    space_idf = f'fsLR' if 'fs' in space else space
+                    space_idf = space
                 else:
                     space_idf = f'{space}_hemi-{hemi}' if 'fs' in space else space
 

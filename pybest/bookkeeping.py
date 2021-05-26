@@ -88,7 +88,7 @@ def find_exp_parameters(cfg, logger):
 
     hemi, space = cfg['hemi'], cfg['space']
     if cfg['iscifti'] == 'y':
-        space_idf = f'LR*.dtseries.nii' if 'fs' in space else 'desc-preproc_bold.nii.gz'
+        space_idf = f'*.dtseries.nii' if 'fs' in space else 'desc-preproc_bold.nii.gz'
     else:
         space_idf = f'hemi-{hemi}*.func.gii' if 'fs' in space else 'desc-preproc_bold.nii.gz'
 
@@ -239,7 +239,7 @@ def find_data(cfg, logger):
 
     # idf = identifier for files
     if cfg['iscifti'] == 'y':
-        idf = f'LR*.dtseries.nii' if 'fs' in space else 'desc-preproc_bold.nii.gz'
+        idf = f'*.dtseries.nii' if 'fs' in space else 'desc-preproc_bold.nii.gz'
     else:
         idf = f'hemi-{hemi}*.func.gii' if 'fs' in space else 'desc-preproc_bold.nii.gz'
 
