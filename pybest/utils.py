@@ -33,7 +33,7 @@ def load_gifti(f, return_tr=True):
         return data
 
 
-def load_and_split_cifti(cifti, indices_file, left_id=None, right_id=None, subc_id=None, mode='surface', return_tr=True):
+def load_and_split_cifti(cifti, indices_file, cfg, left_id=None, right_id=None, subc_id=None, mode='surface', return_tr=True):
     """
     Takes a cifti file and splits it into 3 numpy arrays (left hemisphere,
     right hemispehre and subcortex).
@@ -130,22 +130,30 @@ def load_and_split_cifti(cifti, indices_file, left_id=None, right_id=None, subc_
 
     if mode == 'subcortex' and return_tr==True:
         actual, pos, zdat = get_valid_voxels(s[:, :, :, 2:])
-        return actual.T, pos, zdat, tr
+        cfg['pos'] = pos
+        cfg['zdat'] = zdat
+        return actual.T, tr
 
     elif mode == 'subcortex' and return_tr==False:
         actual, pos, zdat = get_valid_voxels(s[:, :, :, 2:])
-        return actual.T, pos, zdat
+        cfg['pos'] = pos
+        cfg['zdat'] = zdat
+        return actual.T
 
     elif mode=='all' and return_tr==True:
         data = np.vstack([l, r])
         actual, pos, zdat = get_valid_voxels(s[:,:,:,2:])
-        return data.T[2:,:], actual.T, pos, zdat, tr
+        cfg['pos'] = pos
+        cfg['zdat'] = zdat
+        return data.T[2:,:], actual.T, tr
 
 
     else:
         data = np.vstack([l, r])
         actual, pos, zdat = get_valid_voxels(s[:, :, :, 2:])
-        return data.T[2:,:], actual.T, pos, zdat
+        cfg['pos'] = pos
+        cfg['zdat'] = zdat
+        return data.T[2:,:], actual.T
 
 
 def get_valid_voxels(data):
