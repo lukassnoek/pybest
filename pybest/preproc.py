@@ -3,6 +3,7 @@ import os.path as op
 import numpy as np
 import nibabel as nib
 import pandas as pd
+import re
 from tqdm import tqdm
 from nilearn import image, masking, signal
 from joblib import Parallel, delayed
