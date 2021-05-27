@@ -300,7 +300,7 @@ def load_denoising_data(ddict, cfg):
             ddict['trs'] = [load_and_split_cifti(f, cfg['atlas_file'], cfg['left_id'],
                                                  cfg['right_id'], cfg['subc_id'])[1] for f in ddict['funcs']]
         else:
-            ddict['trs'] = [load_gifti(f)[1] for f in ddict['funcs']]
+            ddict['trs'] = [load_gifti(f, cfg)[1] for f in ddict['funcs']]
         ddict['opt_n_comps'] = np.load(op.join(denoising_dir, f'{f_base}_desc-opt_ncomps.npy'))
         if cfg['hrf_model'] == 'kay' and cfg['signalproc_type'] == 'glmdenoise':
             ddict['opt_hrf_idx'] = np.load(op.join(denoising_dir, f'{f_base}_desc-opt_hrf.npy'))

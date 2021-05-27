@@ -81,7 +81,7 @@ def _run_func_parallel(ddict, cfg, run, func, logger):
             data, tr = load_and_split_cifti(func, cfg['atlas_file'],cfg, cfg['left_id'], cfg['right_id'], cfg['subc_id'], cfg['mode'])
             tr /= 1000 # defined in msec
         else:
-            data, tr = load_gifti(func, return_tr=True)
+            data, tr = load_gifti(func, cfg, return_tr=True)
             tr /= 1000  # defined in msec
     else:
         # Load/mask data and extract stuff
@@ -383,7 +383,7 @@ def load_preproc_data(ddict, cfg):
             ddict['trs'] = [load_and_split_cifti(f, cfg['atlas_file'], cfg['left_id'],
                                                  cfg['right_id'], cfg['subc_id'])[1] for f in ddict['funcs']]
         else:
-            ddict['trs'] = [load_gifti(f)[1] for f in ddict['funcs']]  # quite inefficient
+            ddict['trs'] = [load_gifti(f, cfg)[1] for f in ddict['funcs']]  # quite inefficient
     else:
         ddict['trs'] = [nib.load(f).header['pixdim'][4] for f in ddict['funcs']]
 

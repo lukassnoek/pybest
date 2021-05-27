@@ -22,15 +22,16 @@ from nilearn.glm.first_level.design_matrix import _cosine_drift as dct_set
 from .constants import HRFS_HR
 
 
-def load_gifti(f, return_tr=True):
+def load_gifti(f, cfg, return_tr=True):
     """ Load gifti array. """
     f_gif = nib.load(f)
     data = np.vstack([arr.data for arr in f_gif.darrays])
+    start_tr = cfg['skip_tr']
     tr = float(f_gif.darrays[0].get_metadata()['TimeStep'])
     if return_tr:
-        return data, tr
+        return data[start_tr:,:], tr
     else:
-        return data
+        return data[start_tr:,:]
 
 
 def load_and_split_cifti(cifti, indices_file, cfg, left_id=None, right_id=None, subc_id=None, mode='surface', return_tr=True):
