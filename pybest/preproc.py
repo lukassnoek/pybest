@@ -116,7 +116,8 @@ def preprocess_confs_fmriprep(ddict, cfg, logger):
     for i, conf in enumerate(ddict['confs']):
 
         # Load and remove cosine regressors
-        data = pd.read_csv(conf, sep='\t')[cfg['skip_tr']:]
+        start_tr = [item[1] for item in cfg.get('skip_tr') if conf.str.contains(item[0], case=False, regex=True)][0]
+        data = pd.read_csv(conf, sep='\t')[start_tr:]
         if cfg['confounds_filter'] is not None:
             confounds = cfg.get('confounds_filter')
             if type(confounds) == str:
