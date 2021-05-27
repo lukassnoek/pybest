@@ -273,7 +273,22 @@ def preprocess_events(ddict, cfg, logger):
     
     data_ = []
     for i, event in enumerate(ddict['events']):
-        data = pd.read_csv(event, sep='\t')
+        first_match = [item for item in cfg.get('skip_tr') if event.str.contains(item[0], case=False, regex=True)][0]
+        if first_match:
+            skip_tr = first_match[1]
+            match_data = [file for file in ddict['funcs'] if file.str.contains(first_match[0], case=False, regex=True)][0]
+            if 'fs' in cfg['space']:
+                if cfg['iscift'] == 'y':
+                    actual_tr = load_and_split_cifti(match_data, cfg['atlas_file'], cfg['left_id'],
+                                                         cfg['right_id'], cfg['subc_id'])[1]
+                else:
+                    actual_tr = load_gifti(match_data, cfg)[1]
+            else:
+                actual_tr = nib.load(match_data).header['pixdim'][4]
+            data = pd.read_csv(event, sep='\t')
+            data['onset'] = data['onset'] - (actual_tr * skip_tr)
+        else:
+            data = pd.read_csv(event, sep='\t')
         if cfg['trial_filter'] is not None:
             data = data.copy().query(cfg['trial_filter'])
 
