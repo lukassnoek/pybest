@@ -26,7 +26,7 @@ def load_gifti(f, cfg, return_tr=True):
     """ Load gifti array. """
     f_gif = nib.load(f)
     data = np.vstack([arr.data for arr in f_gif.darrays])
-    start_tr = [item[1] for item in cfg.get('skip_tr') if cifti.str.contains(item[0])][0]
+    start_tr = [item[1] for item in cfg.get('skip_tr') if f.str.contains(item[0])][0]
     tr = float(f_gif.darrays[0].get_metadata()['TimeStep'])
     if return_tr:
         return data[start_tr:,:], tr
