@@ -26,7 +26,7 @@ def load_gifti(f, cfg, return_tr=True):
     """ Load gifti array. """
     f_gif = nib.load(f)
     data = np.vstack([arr.data for arr in f_gif.darrays])
-    start_tr = [item[1] for item in cfg.get('skip_tr') if f.contains(item[0], case=False, regex=True)][0]
+    start_tr = [item[1] for item in cfg.get('skip_tr') if f.str.contains(item[0], case=False, regex=True)][0]
     tr = float(f_gif.darrays[0].get_metadata()['TimeStep'])
     if return_tr:
         return data[start_tr:,:], tr
@@ -97,7 +97,7 @@ def load_and_split_cifti(cifti, indices_file, cfg, left_id=None, right_id=None, 
     datvol = nib.load(cifti)
     tr = datvol.header.get_axis(0)[1]
     dat = np.asanyarray(datvol.dataobj)
-    start_tr = [item[1] for item in cfg.get('skip_tr') if cifti.contains(item[0], case=False, regex=True)][0]
+    start_tr = [item[1] for item in cfg.get('skip_tr') if cifti.str.contains(item[0], case=False, regex=True)][0]
     if mode == 'all' or mode == 'surface':
         # Populate left and right hemisphere.
         l, r, = dat[:, lidxs], dat[:, ridxs]
