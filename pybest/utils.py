@@ -99,6 +99,8 @@ def load_and_split_cifti(cifti, indices_file, cfg, left_id=None, right_id=None, 
     tr = datvol.header.get_axis(0)[1]
     dat = np.asanyarray(datvol.dataobj)
     start_tr = [item[1] if re.match(item[0], cifti, re.IGNORECASE) else 0 for item in cfg.get('skip_tr')][0]
+    print(start_tr)
+    print(cifti)
     if mode == 'all' or mode == 'surface':
         # Populate left and right hemisphere.
         l, r, = dat[:, lidxs], dat[:, ridxs]
