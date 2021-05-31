@@ -116,7 +116,7 @@ def preprocess_confs_fmriprep(ddict, cfg, logger):
     for i, conf in enumerate(ddict['confs']):
 
         # Load and remove cosine regressors
-        start_tr = [item[1] for item in cfg.get('skip_tr') if conf.str.contains(item[0], case=False, regex=True)][0]
+        start_tr = [item[1] for item in cfg.get('skip_tr') if re.match(item[0], conf, re.IGNORECASE)][0]
         data = pd.read_csv(conf, sep='\t')[start_tr:]
         if cfg['confounds_filter'] is not None:
             confounds = cfg.get('confounds_filter')
@@ -273,10 +273,10 @@ def preprocess_events(ddict, cfg, logger):
     
     data_ = []
     for i, event in enumerate(ddict['events']):
-        first_match = [item for item in cfg.get('skip_tr') if event.str.contains(item[0], case=False, regex=True)][0]
+        first_match = [item for item in cfg.get('skip_tr') if re.match(item[0], event, re.IGNORECASE)][0]
         if first_match:
             skip_tr = first_match[1]
-            match_data = [file for file in ddict['funcs'] if file.str.contains(first_match[0], case=False, regex=True)][0]
+            match_data = [file for file in ddict['funcs'] if re.match(first_match[0], file, re.IGNORECASE)][0]
             if 'fs' in cfg['space']:
                 if cfg['iscift'] == 'y':
                     actual_tr = load_and_split_cifti(match_data, cfg['atlas_file'], cfg['left_id'],
