@@ -100,7 +100,7 @@ def load_and_split_cifti(cifti, indices_file, cfg, left_id=None, right_id=None, 
     dat = np.asanyarray(datvol.dataobj)
     start_tr = [item[1] if re.match(str(item[0]), cifti, re.IGNORECASE) else 0 for item in cfg.get('skip_tr')][0]
     for item in cfg.get('skip_tr'):
-        m = re.match(str(item[0]), cifti, re.IGNORECASE)
+        m = re.search(item[0], cifti, re.IGNORECASE)
         print(m)
     print(start_tr)
     print(cifti)
