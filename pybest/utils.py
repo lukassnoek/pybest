@@ -98,10 +98,7 @@ def load_and_split_cifti(cifti, indices_file, cfg, left_id=None, right_id=None, 
     datvol = nib.load(cifti)
     tr = datvol.header.get_axis(0)[1]
     dat = np.asanyarray(datvol.dataobj)
-    start_tr = [item[1] if re.match(item[0], cifti, re.IGNORECASE) else 0 for item in cfg.get('skip_tr')][0]
-    for item in cfg.get('skip_tr'):
-        print(item[0])
-    #print(cfg.get('skip_tr'))
+    start_tr = [item[1] if re.match(str(item[0]), cifti, re.IGNORECASE) else 0 for item in cfg.get('skip_tr')][0]
     print(start_tr)
     print(cifti)
     if mode == 'all' or mode == 'surface':
