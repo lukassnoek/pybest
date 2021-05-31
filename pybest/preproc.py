@@ -119,6 +119,7 @@ def preprocess_confs_fmriprep(ddict, cfg, logger):
         start_tr = [item[1] if re.search(item[0], conf, re.IGNORECASE) else 0 for item in cfg.get('skip_tr')][0]
         data = pd.read_csv(conf, sep='\t')[start_tr:]
         if cfg.get('confounds_filter') is not None:
+            print(cfg.get('confounds_filter'))
             confounds = cfg.get('confounds_filter')
             if type(confounds) == str:
                 data = data.filter(regex=confounds)
