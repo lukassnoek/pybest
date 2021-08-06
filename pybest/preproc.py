@@ -3,6 +3,7 @@ import os.path as op
 import numpy as np
 import nibabel as nib
 import pandas as pd
+import re
 from tqdm import tqdm
 from nilearn import image, masking, signal
 from joblib import Parallel, delayed
@@ -12,7 +13,7 @@ from sklearn.linear_model import LinearRegression
 
 from .logging import tqdm_ctm, tdesc
 from .models import cross_val_r2
-from .utils import load_gifti, get_frame_times, create_design_matrix, hp_filter, save_data
+from .utils import load_gifti, get_frame_times, create_design_matrix, hp_filter, save_data, load_and_split_cifti
 
 
 def preprocess_funcs(ddict, cfg, logger):
@@ -76,8 +77,12 @@ def _run_func_parallel(ddict, cfg, run, func, logger):
     """ Parallelizes loading/hp-filtering of fMRI run. """
     # Load data
     if 'fs' in cfg['space']:  # assume gifti
-        data, tr = load_gifti(func, return_tr=True)
-        tr /= 1000  # defined in msec
+        if cfg['iscifti'] == 'y':
+            data, tr = load_and_split_cifti(func, cfg['atlas_file'],cfg, cfg['left_id'], cfg['right_id'], cfg['subc_id'], cfg['mode'])
+            tr /= 1000 # defined in msec
+        else:
+            data, tr = load_gifti(func, cfg, return_tr=True)
+            tr /= 1000  # defined in msec
     else:
         # Load/mask data and extract stuff
         tr = nib.load(func).header['pixdim'][4]
@@ -111,7 +116,17 @@ def preprocess_confs_fmriprep(ddict, cfg, logger):
     for i, conf in enumerate(ddict['confs']):
 
         # Load and remove cosine regressors
-        data = pd.read_csv(conf, sep='\t')
+        start_tr = [item[1] if re.search(item[0], conf, re.IGNORECASE) else 0 for item in cfg.get('skip_tr')][0]
+        data = pd.read_csv(conf, sep='\t')[start_tr:]
+        if cfg.get('confounds_filter')[0] is not None:
+            confounds = cfg.get('confounds_filter')
+            if type(confounds) == str:
+                data = data.filter(regex=confounds)
+            else:
+                col_reg = re.compile('|'.join(confounds))
+                data = data.filter(regex=col_reg)
+
+
         # Remove cosines and confounds related to the global signal
         # Anecdotal evidence that leaving out the global signal gives better results ...
         to_remove = [col for col in data.columns if 'cosine' in col or 'global' in col]
@@ -258,7 +273,22 @@ def preprocess_events(ddict, cfg, logger):
     
     data_ = []
     for i, event in enumerate(ddict['events']):
-        data = pd.read_csv(event, sep='\t')
+        first_match = [item if re.search(item[0], event, re.IGNORECASE) else 0 for item in cfg.get('skip_tr')][0]
+        if first_match:
+            skip_tr = first_match[1]
+            match_data = [file if re.search(first_match[0], file, re.IGNORECASE) else 0 for file in ddict['funcs']][0]
+            if 'fs' in cfg['space']:
+                if cfg['iscift'] == 'y':
+                    actual_tr = load_and_split_cifti(match_data, cfg['atlas_file'], cfg['left_id'],
+                                                         cfg['right_id'], cfg['subc_id'])[1]
+                else:
+                    actual_tr = load_gifti(match_data, cfg)[1]
+            else:
+                actual_tr = nib.load(match_data).header['pixdim'][4]
+            data = pd.read_csv(event, sep='\t')
+            data['onset'] = data['onset'] - (actual_tr * skip_tr)
+        else:
+            data = pd.read_csv(event, sep='\t')
         if cfg['trial_filter'] is not None:
             data = data.copy().query(cfg['trial_filter'])
 
@@ -365,7 +395,11 @@ def load_preproc_data(ddict, cfg):
     
     # Load in TRs (inefficient; maybe save/load as yaml?)
     if 'fs' in cfg['space']:
-        ddict['trs'] = [load_gifti(f)[1] for f in ddict['funcs']]  # quite inefficient
+        if cfg['iscift'] == 'y':
+            ddict['trs'] = [load_and_split_cifti(f, cfg['atlas_file'], cfg['left_id'],
+                                                 cfg['right_id'], cfg['subc_id'])[1] for f in ddict['funcs']]
+        else:
+            ddict['trs'] = [load_gifti(f, cfg)[1] for f in ddict['funcs']]  # quite inefficient
     else:
         ddict['trs'] = [nib.load(f).header['pixdim'][4] for f in ddict['funcs']]
 

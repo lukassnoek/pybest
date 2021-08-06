@@ -13,7 +13,7 @@ from sklearn.model_selection import RepeatedKFold, LeaveOneGroupOut
 
 from .logging import tqdm_ctm, tdesc
 from .utils import get_run_data, get_frame_times, create_design_matrix, hp_filter
-from .utils import save_data, load_gifti, custom_clean, argmax_regularized
+from .utils import save_data, load_gifti, custom_clean, argmax_regularized, load_and_split_cifti
 from .models import cross_val_r2
 
 
@@ -296,7 +296,11 @@ def load_denoising_data(ddict, cfg):
         ddict['mask'] = nib.load(op.join(preproc_dir, f'{f_base}_desc-preproc_mask.nii.gz'))
 
     if 'fs' in cfg['space']:
-        ddict['trs'] = [load_gifti(f)[1] for f in ddict['funcs']]
+        if cfg['iscift'] == 'y':
+            ddict['trs'] = [load_and_split_cifti(f, cfg['atlas_file'], cfg['left_id'],
+                                                 cfg['right_id'], cfg['subc_id'])[1] for f in ddict['funcs']]
+        else:
+            ddict['trs'] = [load_gifti(f, cfg)[1] for f in ddict['funcs']]
         ddict['opt_n_comps'] = np.load(op.join(denoising_dir, f'{f_base}_desc-opt_ncomps.npy'))
         if cfg['hrf_model'] == 'kay' and cfg['signalproc_type'] == 'glmdenoise':
             ddict['opt_hrf_idx'] = np.load(op.join(denoising_dir, f'{f_base}_desc-opt_hrf.npy'))

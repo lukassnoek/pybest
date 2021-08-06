@@ -23,6 +23,10 @@ from .signal_model import run_signal_processing
 # 1. Positional args
 @click.argument('fprep_dir')  # Path to Fmriprep output directory
 @click.argument('bids_dir', default=None, required=False)  # Optional BIDS-directory (for event-files)
+@click.argument('atlas_file', default=None, required=False) # If working with cifti, give path to atlas (.npy, .npz or .hdf5)
+@click.argument('left_id', default=None, required=False) # If working with cifti, give key or index of left hemi in atlas file
+@click.argument('right_id', default=None, required=False) # If working with cifti, give key or index of right hemi in atlas file
+@click.argument('subc_id', default=None, required=False) # If working with cifti, give key or index of subcortex in atlas file
 # 2. Which data should we select?
 @click.option('--out-dir', default=None, help='Output directory (default: same level as Fmriprep directory)')
 @click.option('--start-from', type=click.Choice(['preproc', 'noiseproc', 'signalproc']), default='preproc', help='Stage to start analysis from')
@@ -33,6 +37,10 @@ from .signal_model import run_signal_processing
 @click.option('--task', default=None, help='Task identifier (e.g., prf); default: all tasks pybest can find')
 @click.option('--space', default='T1w', show_default=True, help='Output space of data to be processed (e.g., T1w, MNI152NLin2009cAsym)')
 @click.option('--hemi', type=click.Choice(['L', 'R']), default='L', show_default=True, help='Hemisphere to process (only relevant when dealing with surface space data)')
+@click.option('--iscifti', type=click.Choice(['y', 'n']), default='n', show_default=True, help='Choose "y" if files in cifti format')
+@click.option('--mode', type=click.Choice(['surface', 'subcortex', 'all']), default='surface', show_default=True, help='When using cifti file, choose whether to process surface, subcortex or both')
+@click.option('--skip-tr', nargs=2, multiple=True, default=[(None,0)], type=(click.STRING,click.INT), show_default=True, help='Number of TRs to skip (in case of unwanted peak in data) for a specific file -> [file] [tr]')
+@click.option('--confounds-filter', '-cf', default=[None], multiple=True, type=click.STRING, help='Confounds to select (multiple as list) - partial strings are enough (regex)')
 # 3. Preproc options
 @click.option('--gm-thresh', default=0., show_default=True, help='Threshold for gray-matter mask (if 0, Fmriprep brain masks are used)')  # maybe use a "mask" option
 @click.option('--slice-time-ref', type=click.FLOAT, default=0.5, show_default=True, help='Slice to adjust event onsets to (depends on slice-time correction)')
@@ -67,8 +75,8 @@ from .signal_model import run_signal_processing
 @click.option('--save-all', is_flag=True, help='Save more outputs than strictly necessary (but nice to inspect your data in detail)')
 @click.option('--save-mgz', is_flag=True, help='Save surface files as mgz instead of npy files')
 @click.option('--verbose', default='INFO', type=click.Choice(['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']), show_default=True, help='Verbosity level')
-def main(fprep_dir, bids_dir, out_dir, start_from, ricor_dir, subject, session, pool_sessions, task, space, hemi,
-         gm_thresh, slice_time_ref, high_pass_type, high_pass, trial_filter, skip_noiseproc, noise_source, decomp, n_comps,
+def main(fprep_dir, bids_dir, atlas_file, left_id, right_id, subc_id, out_dir, start_from, ricor_dir, subject, session, pool_sessions, task, space, hemi,
+         iscifti, mode, skip_tr, confounds_filter, gm_thresh, slice_time_ref, high_pass_type, high_pass, trial_filter, skip_noiseproc, noise_source, decomp, n_comps,
          noiseproc_type, cv_repeats, cv_splits, regularize_n_comps, argmax_percent, skip_signalproc, signalproc_type, contrast,
          single_trial_id, hrf_model, single_trial_noise_model, regularize_hrf_model, single_trial_model, pattern_units, uncorrelation,
          smoothing_fwhm, n_cpus, save_all, save_mgz, verbose):
@@ -98,7 +106,10 @@ def main(fprep_dir, bids_dir, out_dir, start_from, ricor_dir, subject, session, 
                 logger.info(f"Starting process for sub-{sub},{s} task-{task}")
                 
                 # Some bookkeeping
-                space_idf = f'{space}_hemi-{hemi}' if 'fs' in space else space
+                if iscifti == 'y':
+                    space_idf = space
+                else:
+                    space_idf = f'{space}_hemi-{hemi}' if 'fs' in space else space
 
                 # f_base: base for output files
                 if ses is None:  # no separate session output dir

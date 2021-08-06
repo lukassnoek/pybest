@@ -5,6 +5,8 @@ import os.path as op
 import numpy as np
 import nibabel as nib
 import pandas as pd
+import h5py
+import re
 from tqdm import tqdm
 from glob import glob
 from scipy.interpolate import interp1d
@@ -21,15 +23,151 @@ from nilearn.glm.first_level.design_matrix import _cosine_drift as dct_set
 from .constants import HRFS_HR
 
 
-def load_gifti(f, return_tr=True):
+def load_gifti(f, cfg, return_tr=True):
     """ Load gifti array. """
     f_gif = nib.load(f)
     data = np.vstack([arr.data for arr in f_gif.darrays])
+    start_tr = [item[1] if re.search(item[0], f, re.IGNORECASE) else 0 for item in cfg.get('skip_tr')][0]
     tr = float(f_gif.darrays[0].get_metadata()['TimeStep'])
     if return_tr:
-        return data, tr
+        return data[start_tr:,:], tr
     else:
-        return data
+        return data[start_tr:,:]
+
+
+def load_and_split_cifti(cifti, indices_file, cfg, left_id=None, right_id=None, subc_id=None, mode='surface', return_tr=True):
+    """
+    Takes a cifti file and splits it into 3 numpy arrays (left hemisphere,
+    right hemispehre and subcortex).
+
+    Produces equivalent results to reading in files produced by the below
+    connectome workbench command, but does not save the files. Useful for not
+    creating unwanted files.
+
+    wb_command -cifti-separate {cii} COLUMN -volume-all {cii_n}_subvol.nii.gz -metric CORTEX_LEFT {cii_n}_L.gii -metric CORTEX_RIGHT {cii_n}_R.gii\n
+
+    For instance, it will produce the same results (as assessed by np.array_equal) to the following:
+
+    l=nib.load('{cii_n}_L.gii')
+    l=np.array(l.agg_data()).T (transposed to make time last dimension)
+
+    r=nib.load('{cii_n}_R.gii')
+    r=np.array(r.agg_data()).T
+
+    s=nib.load('{cii_n}_subvol.nii.gz')
+    s=np.asanyarray(s.dataobj)
+
+
+    Parameters
+    ----------
+    cifti : Path to the cifti file to split.
+    indices_file : Path to .hdf5, .npz or .npy file with indices of cortical surface and subcortex.
+    left_id, right_id, subc_id : either strings (keys) for .hfd5 and .npy or int ('sub'-array in array) for .npy file.
+    mode: which to return "all" = surface and subcortex, "subcortex" = only subcortex, "surface" = only surface
+    Returns
+    -------
+    l = left hemisphere (np.array, vertices * time).
+    r = right hemisphere (np.array, vertices * time).
+    s = subcortex (np.array, last dimension = time)
+    """
+
+    # Read the indexes
+    try:
+        if indices_file.lower().endswith(".hdf5"):
+            idxs = h5py.File(indices_file, "r")
+            if mode == 'all' or mode == 'surface':
+                lidxs = np.array(idxs[left_id])
+                ridxs = np.array(idxs[right_id])
+            if mode == 'all' or mode == 'subcortex':
+                sidxs = np.array(idxs[subc_id])
+
+            idxs.close()
+
+        elif indices_file.lower().endswith((".npy", ".npz")):
+            idxs = np.load(indices_file)
+            if mode == 'all' or mode == 'surface':
+                lidxs = idxs[left_id]
+                ridxs = idxs[right_id]
+            if mode == 'all' or mode == 'subcortex':
+                sidxs = idxs[subc_id]
+
+    except Exception as exc:
+        raise ValueError("Extension must be .hdf5, .npy or .npz") from exc
+
+    # Load the data
+    datvol = nib.load(cifti)
+    tr = datvol.header.get_axis(0)[1]
+    dat = np.asanyarray(datvol.dataobj)
+    start_tr = [item[1] if re.search(str(item[0]), cifti, re.IGNORECASE) else 0 for item in cfg.get('skip_tr')][0]
+    if mode == 'all' or mode == 'surface':
+        # Populate left and right hemisphere.
+        l, r, = dat[:, lidxs], dat[:, ridxs]
+
+        # Replace the minus 1
+        l[:, lidxs == -1] = np.zeros_like(l[:, lidxs == -1])
+        r[:, ridxs == -1] = np.zeros_like(r[:, ridxs == -1])
+
+        # Last dimension time.
+        l, r = l.T, r.T
+
+    if mode == 'surface' and return_tr==True:
+        data = np.vstack([l, r])
+        return data.T[start_tr:,:], tr
+    elif mode == 'surface' and return_tr==False:
+        data = np.vstack([l, r])
+        return data.T[start_tr:,:]
+
+    if mode == 'all' or mode == 'subcortex':
+        # Get indexes for valid elements.
+        nonpad = sidxs.flatten()[sidxs.flatten() != -1]
+
+        # Make empty matrix for subcortex
+        s = np.zeros((dat.shape[0], *sidxs.shape))
+
+        # Populate with the appropriate data
+        s[:, sidxs != -1] = dat[:, nonpad]
+
+        # Last dimension time.
+        s = np.moveaxis(s, 0, -1)
+
+    if mode == 'subcortex' and return_tr==True:
+        actual, pos, zdat = get_valid_voxels(s[:, :, :, start_tr:])
+        cfg['pos'] = pos
+        cfg['subc_original'] = s[:, :, :, start_tr:]
+        return actual.T, tr
+
+    elif mode == 'subcortex' and return_tr==False:
+        actual, pos, zdat = get_valid_voxels(s[:, :, :, start_tr:])
+        cfg['pos'] = pos
+        cfg['subc_original'] = s[:, :, :, start_tr:]
+        return actual.T
+
+    elif mode=='all' and return_tr==True:
+        data = np.vstack([l, r])[:,start_tr:]
+        actual, pos, zdat = get_valid_voxels(s[:,:,:,start_tr:])
+        data = np.vstack([data, actual])
+        cfg['pos'] = pos
+        cfg['subc_original'] = s[:, :, :, start_tr:]
+        cfg['subc_len'] = actual.shape[0]
+        return data.T, tr
+
+
+    else:
+        data = np.vstack([l, r])[:,start_tr:]
+        actual, pos, zdat = get_valid_voxels(s[:, :, :, start_tr:])
+        data = np.vstack([data, actual])
+        cfg['pos'] = pos
+        cfg['subc_original'] = s[:, :, :, start_tr:]
+        cfg['subc_len'] = actual.shape[0]
+        return data.T
+
+
+def get_valid_voxels(data):
+    stds=np.std(data,axis=-1)
+    positions=np.where(stds!=0)
+    zdat=np.zeros_like(stds)
+    actual=data[stds!=0]
+    return actual,positions,zdat
 
 
 def argmax_regularized(data, axis=0, percent=5):
@@ -100,7 +238,10 @@ def save_data(data, cfg, ddict, par_dir, desc, dtype, run=None, ext=None,
         os.makedirs(save_dir, exist_ok=True)
 
     sub, ses, task, space, hemi = cfg['c_sub'], cfg['c_ses'], cfg['c_task'], cfg['space'], cfg['hemi']
-    space_idf = f'{space}_hemi-{hemi}' if 'fs' in space else space
+    if cfg['iscifti'] == 'y':
+        space_idf = space
+    else:
+        space_idf = f'{space}_hemi-{hemi}' if 'fs' in space else space
 
     if ses is None:  # no separate session output dir
         f_base = f"sub-{sub}_task-{task}"
@@ -127,7 +268,25 @@ def save_data(data, cfg, ddict, par_dir, desc, dtype, run=None, ext=None,
                 raise ValueError("Trying to save data with >2 dimensions as MGZ file ...")
             nib.MGHImage(data, np.eye(4)).to_filename(f_out + '.mgz')
         else:
-            np.save(f_out + '.npy', data)
+            if cfg['iscifti'] == 'y' and cfg['mode'] == 'subcortex':
+                subc_data = cfg['subc_original']
+                pos = cfg['pos']
+                subc_data[pos] = data.T
+                np.save(f_out + '_subc.npy', subc_data)
+            elif cfg['iscifti'] == 'y' and cfg['mode'] == 'all':
+                # split in surface and subcortex, save both
+                surf_len = data.shape[1] - cfg['subc_len']
+                surface_data = data[:, :surf_len].T
+                subc_data = data[:,surf_len:].T
+                subc_orig = cfg['subc_original']
+                pos = cfg['pos']
+                subc_orig[pos] = subc_data
+                np.save(f_out + '_subc.npy', subc_orig)
+                np.save(f_out + '.npy', surface_data)
+            elif cfg['iscifti'] == 'y' and cfg['mode'] == 'surface':
+                np.save(f_out + '.npy', data.T)
+            else:
+                np.save(f_out + '.npy', data)
     else:  # volume, depends on `nii` arg
         if nii:  # save as volume
             if not isinstance(data, nib.Nifti1Image):
