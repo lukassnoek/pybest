@@ -99,11 +99,12 @@ def run_noise_processing(ddict, cfg, logger):
                 # Whenever r2 < 0, set opt_n_comps to zero (no denoising)
                 ddict['opt_n_comps'][run, r2_max < 0] = 0
 
-                if cfg['save_all']:  # save per-run statistics
-                    opt_n_comps = ddict['opt_n_comps'][run, :]
-                    to_save = [(r2_ncomps, 'ncomps', 'r2'), (r2_max, 'max', 'r2'), (opt_n_comps, 'opt', 'ncomps')]
-                    for data, desc, dtype in to_save:
-                        save_data(data, cfg, ddict, par_dir='denoising', run=run+1, desc=desc, dtype=dtype, nii=True)
+                if cfg['iscifti'] == 'n':
+                    if cfg['save_all']:  # save per-run statistics
+                        opt_n_comps = ddict['opt_n_comps'][run, :]
+                        to_save = [(r2_ncomps, 'ncomps', 'r2'), (r2_max, 'max', 'r2'), (opt_n_comps, 'opt', 'ncomps')]
+                        for data, desc, dtype in to_save:
+                            save_data(data, cfg, ddict, par_dir='denoising', run=run+1, desc=desc, dtype=dtype, nii=True)
 
     else:  # between-run, GLMdenoise style denoising
         # Also check 0 components!

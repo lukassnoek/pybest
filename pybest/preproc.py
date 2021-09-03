@@ -48,11 +48,11 @@ def preprocess_funcs(ddict, cfg, logger):
         (ddict, cfg, run, func, logger)
         for run, func in enumerate(tqdm_ctm(ddict['funcs'], tdesc('Preprocessing funcs:')))
     )
-
+    
     # Concatenate data in time dimension
     data = np.vstack([d[0] for d in out])
     run_idx = np.concatenate([r[1] for r in out]).astype(int)
-
+    
     # Save functional data, ALWAYS as npy file (saves time/disk space)
     save_data(data, cfg, ddict, par_dir='preproc', run=None, desc='preproc', dtype='bold')
 
@@ -79,10 +79,10 @@ def _run_func_parallel(ddict, cfg, run, func, logger):
     if 'fs' in cfg['space']:  # assume gifti
         if cfg['iscifti'] == 'y':
             data, tr = load_and_split_cifti(func, cfg['atlas_file'],cfg, cfg['left_id'], cfg['right_id'], cfg['subc_id'], cfg['mode'])
-            tr /= 1000 # defined in msec
+            #tr /= 1000 # defined in msec
         else:
             data, tr = load_gifti(func, cfg, return_tr=True)
-            tr /= 1000  # defined in msec
+            #tr /= 1000  # defined in msec
     else:
         # Load/mask data and extract stuff
         tr = nib.load(func).header['pixdim'][4]
@@ -116,7 +116,7 @@ def preprocess_confs_fmriprep(ddict, cfg, logger):
     for i, conf in enumerate(ddict['confs']):
 
         # Load and remove cosine regressors
-        start_tr = [item[1] if re.search(item[0], conf, re.IGNORECASE) else 0 for item in cfg.get('skip_tr')][0]
+        start_tr = [item[1] if re.search(str(item[0]), conf, re.IGNORECASE) else 0 for item in cfg.get('skip_tr')][0]
         data = pd.read_csv(conf, sep='\t')[start_tr:]
         if cfg.get('confounds_filter')[0] is not None:
             confounds = cfg.get('confounds_filter')
@@ -278,7 +278,7 @@ def preprocess_events(ddict, cfg, logger):
             skip_tr = first_match[1]
             match_data = [file if re.search(first_match[0], file, re.IGNORECASE) else 0 for file in ddict['funcs']][0]
             if 'fs' in cfg['space']:
-                if cfg['iscift'] == 'y':
+                if cfg['iscifti'] == 'y':
                     actual_tr = load_and_split_cifti(match_data, cfg['atlas_file'], cfg['left_id'],
                                                          cfg['right_id'], cfg['subc_id'])[1]
                 else:
@@ -395,7 +395,7 @@ def load_preproc_data(ddict, cfg):
     
     # Load in TRs (inefficient; maybe save/load as yaml?)
     if 'fs' in cfg['space']:
-        if cfg['iscift'] == 'y':
+        if cfg['iscifti'] == 'y':
             ddict['trs'] = [load_and_split_cifti(f, cfg['atlas_file'], cfg['left_id'],
                                                  cfg['right_id'], cfg['subc_id'])[1] for f in ddict['funcs']]
         else:
