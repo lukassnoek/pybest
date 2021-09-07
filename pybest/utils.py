@@ -250,6 +250,8 @@ def save_data(data, cfg, ddict, par_dir, desc, dtype, run=None, ext=None,
         
     if run is None:
         f_out = op.join(save_dir, f_base + f'_space-{space_idf}_desc-{desc}_{dtype}')
+        runs = len(ddict['funcs'])
+        tr = int(data.shape[0]/runs)
     else:
         f_out = op.join(save_dir, f_base + f'_run-{run}_space-{space_idf}_desc-{desc}_{dtype}')
 
@@ -268,21 +270,53 @@ def save_data(data, cfg, ddict, par_dir, desc, dtype, run=None, ext=None,
                 raise ValueError("Trying to save data with >2 dimensions as MGZ file ...")
             nib.MGHImage(data, np.eye(4)).to_filename(f_out + '.mgz')
         else:
-            if cfg['iscifti'] == 'y' and cfg['mode'] == 'subcortex':
+            if cfg['iscifti'] == 'y' and cfg['mode'] == 'subcortex':   
+                
                 subc_data = cfg['subc_original']
                 pos = cfg['pos']
-                subc_data[pos] = data.T
-                np.save(f_out + '_subc.npy', subc_data)
+                if run is None:
+                    data_splitted = [data[x:x+tr,:] for x in range(0, data.shape[0], tr)]
+                    full_data = dict()
+                    for idx, run_data in enumerate(data_splitted):   
+                        subc_data[pos] = run_data.T
+                        full_data[idx] = subc_data
+                        data_to_save = np.concatenate([v for k, v in full_data.items()], 3)
+                    np.save(f_out + '_subc.npy', data_to_save)
+                else:
+                    subc_data[pos] = data.T
+                    np.save(f_out + '_subc.npy', subc_data)
+
             elif cfg['iscifti'] == 'y' and cfg['mode'] == 'all':
+                
                 # split in surface and subcortex, save both
                 surf_len = data.shape[1] - cfg['subc_len']
-                surface_data = data[:, :surf_len].T
-                subc_data = data[:,surf_len:].T
                 subc_orig = cfg['subc_original']
                 pos = cfg['pos']
-                subc_orig[pos] = subc_data
-                np.save(f_out + '_subc.npy', subc_orig)
-                np.save(f_out + '.npy', surface_data)
+                
+                if run is None:
+                    data_splitted = [data[x:x+tr,:] for x in range(0, data.shape[0], tr)]
+                    full_surface_data = dict()
+                    full_subc_data = dict()
+                    for idx, run_data in enumerate(data_splitted):
+                        subc_data = run_data[:,surf_len:].T
+                        subc_orig[pos] = subc_data
+                        full_subc_data[idx] = subc_orig
+                        subc_data_to_save = np.concatenate([v for k, v in full_subc_data.items()], 3)
+                        
+                        surface_data = run_data[:, :surf_len].T
+                        full_surface_data[idx] = surface_data
+                        surface_data_to_save = np.concatenate([v for k, v in full_surface_data.items()], 1)
+                        
+                    np.save(f_out + '_subc.npy', subc_data_to_save)
+                    np.save(f_out + '.npy', surface_data_to_save)
+                
+                else:
+                    surface_data = data[:, :surf_len].T
+                    subc_data = data[:,surf_len:].T
+                    subc_orig[pos] = subc_data
+                    np.save(f_out + '_subc.npy', subc_orig)
+                    np.save(f_out + '.npy', surface_data)
+                
             elif cfg['iscifti'] == 'y' and cfg['mode'] == 'surface':
                 np.save(f_out + '.npy', data.T)
             else:
