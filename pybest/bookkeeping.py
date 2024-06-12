@@ -259,10 +259,8 @@ def find_data(cfg, logger):
             f"sub-{sub}, ses-{ses}, task-{task}, space-{space}_{idf}"
         )
 
-    if cfg['iscifti'] == 'y':
-        confs = sorted(glob(op.join(ffunc_dir, f'*task-{task}_*desc-confounds_timeseries.tsv')))
-    else:
-        confs = sorted(glob(op.join(ffunc_dir, f'*task-{task}_*desc-confounds_regressors.tsv')))
+
+    confs = sorted(glob(op.join(ffunc_dir, f'*task-{task}_*desc-confounds_timeseries.tsv')))
 
     # Find event files, which should be in the BIDS dir
     bids_dir = cfg['bids_dir']
@@ -301,7 +299,7 @@ def find_data(cfg, logger):
     ricor_dir = cfg['ricor_dir']
     if ricor_dir is not None:
         ricors = sorted(glob(op.join(
-            ricor_dir, f'sub-{sub}', f'ses-{ses}', 'physio', f'*task-{task}_*regressors.tsv'
+            ricor_dir, f'sub-{sub}', f'ses-{ses}', 'physio', f'*task-{task}_*timeseries.tsv'
         )))
         logger.info(f"Found {len(ricors)} RETROICOR files for task {task}")
     else:
