@@ -13,7 +13,7 @@ with open('README.md') as f:
     LONG_DESCRIPTION = f.read()
 
 with open('requirements.txt') as f:
-    REQUIRES = f.readlines()
+    REQUIRES = [line.strip() for line in f if line.strip()]
 
 opts = dict(
     name=NAME,
@@ -32,7 +32,6 @@ opts = dict(
     packages=PACKAGES,
     package_data=PACKAGE_DATA,
     install_requires=REQUIRES,
-    requires=REQUIRES,
     entry_points={
         'console_scripts': [
             'pybest=pybest.cli:main',
